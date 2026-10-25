@@ -1,0 +1,41 @@
+name: Daily EOD US Stock Screener Data Update
+
+on:
+  schedule:
+    # Runs Monday through Friday at 21:30 UTC (4:30 PM / 5:30 PM US Eastern Time, after US Market Close)
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch: # Allows manual 1-click trigger anytime in GitHub Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update-eod-snapshot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch EOD US Universe, S&P 500 Benchmark & 252-Day Indicators
+        run: |
+          python -m src.data_pipeline
+
+      - name: Commit and Push Updated Daily Snapshot
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/daily_snapshot.parquet data/benchmark_sp500.json
+          git diff --staged --quiet || git commit -m "chore(data): automated EOD market snapshot update [skip ci]"
+          git push
