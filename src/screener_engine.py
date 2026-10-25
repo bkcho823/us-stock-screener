@@ -1,9 +1,10 @@
 """
-Step 3: Layer 0 & Layer 1 Screening & Math Engine
-- Applies all 12 adjustable Layer 0 Pre-Filter controls (Market Cap, Price, 1D/10D/30D/60D/90D Volume, Dollar Volume, Exchanges, ETF/ADR toggles)
+Step 3: Layer 0 & Layer 1 Screening & Math Engine (Chief UI Designer Enhanced Edition)
+- Applies all 12 adjustable Layer 0 Pre-Filter controls
 - Dynamically computes the 1-99 Relative Strength (RS) Percentile across the qualifying Layer 0 candidate pool
-- Evaluates all 11 Layer 1 Trend & Momentum conditions (with independent ON/OFF toggles and adjustable thresholds)
-- Returns full condition-by-condition pass/fail breakdown and summary metrics in <1 second.
+- Evaluates all 11 Layer 1 Trend & Momentum conditions
+- Produces Plain-English Diagnostic Badges ('✅ All 11 Passed' vs '⚠️ Missed: C7 (52W High)')
+- Computes per-condition bottleneck pass counts & percentages across the Layer 0 pool
 """
 
 from __future__ import annotations
@@ -13,6 +14,20 @@ import numpy as np
 import pandas as pd
 
 from src.config import compute_dynamic_sp500_threshold, CONDITION_METADATA
+
+SHORT_DIAGNOSTIC_LABELS: Dict[str, str] = {
+    "c1": "C1(P>150/200)",
+    "c2": "C2(150>200)",
+    "c3": "C3(200↑)",
+    "c4": "C4(50>150>200)",
+    "c5": "C5(P>50)",
+    "c6": "C6(52W Low)",
+    "c7": "C7(52W High)",
+    "c8": "C8(RS Rank)",
+    "c9": "C9(10≥20)",
+    "c10": "C10(1M vs S&P)",
+    "c11": "C11(6M vs S&P)",
+}
 
 
 def _pick_nearest_lag_column(lookback_days: int) -> str:
@@ -85,8 +100,9 @@ def evaluate_layer1_conditions(
     sp500_benchmark: Dict[str, Any],
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
-    Computes dynamic pool-wide RS Percentile (1-99) across the Layer 0 candidate pool
-    and evaluates all 11 Layer 1 Trend & Momentum conditions.
+    Computes dynamic pool-wide RS Percentile (1-99) across the Layer 0 candidate pool,
+    evaluates all 11 Layer 1 Trend & Momentum conditions, builds Plain-English diagnostic
+    badges, and computes condition bottleneck statistics.
     """
     if df_l0 is None or df_l0.empty:
         return pd.DataFrame(), {
@@ -95,6 +111,10 @@ def evaluate_layer1_conditions(
             "y_1m_threshold_pct": 0.0,
             "y_6m_threshold_pct": 0.0,
             "lag_col_used": "sma_200_lag_20",
+            "layer0_count": 0,
+            "qualified_count": 0,
+            "near_miss_count": 0,
+            "condition_bottlenecks": [],
         }
 
     df = df_l0.copy()
@@ -134,7 +154,10 @@ def evaluate_layer1_conditions(
 
     # C7: Close >= 52W High * (1 - Y%)  (i.e. within Y% below 52W high)
     max_below_high_pct = float(layer1_cfg.get("c7_max_pct_below_52w_high", 25.0))
-    df["pct_below_52w_high"] = (((df["high_52w"] - df["close"]) / df["high_52w"]) * 100.0).round(2)
+    df["pct_below_52w_high"] = (
+        ((df["high_52w"] - df["close"]) / df["high_52w"]).clip(lower=0.0) * 100.0
+    ).round(2)
+    df["pct_of_52w_high"] = (100.0 - df["pct_below_52w_high"]).clip(0.0, 100.0).round(1)
     df["c7_pass"] = df["pct_below_52w_high"] <= max_below_high_pct
 
     # C8: RS Percentile >= Min Qualifying Percentile (default 70)
@@ -166,11 +189,27 @@ def evaluate_layer1_conditions(
     )
     df["c11_pass"] = df["perf_6m"].fillna(-999.0) > y_6m_thresh
 
-    # Count how many of the ENABLED conditions each stock passes
+    # Count how many of the ENABLED conditions each stock passes & build bottlenecks
     active_ids: List[str] = []
+    bottlenecks: List[Dict[str, Any]] = []
+    total_l0 = len(df)
+
     for meta in CONDITION_METADATA:
         cid = meta["id"]
-        if bool(layer1_cfg.get(f"{cid}_enabled", True)):
+        enabled = bool(layer1_cfg.get(f"{cid}_enabled", True))
+        pass_cnt = int(df[f"{cid}_pass"].sum())
+        pass_pct = round((pass_cnt / total_l0) * 100.0, 1) if total_l0 > 0 else 0.0
+        bottlenecks.append(
+            {
+                "id": cid.upper(),
+                "short_label": SHORT_DIAGNOSTIC_LABELS.get(cid, cid.upper()),
+                "name": meta["short_name"],
+                "enabled": enabled,
+                "pass_count": pass_cnt,
+                "pass_pct": pass_pct,
+            }
+        )
+        if enabled:
             active_ids.append(cid)
 
     if active_ids:
@@ -185,11 +224,28 @@ def evaluate_layer1_conditions(
 
     df["pass_summary"] = df["passed_count"].astype(str) + " / " + df["total_active"].astype(str)
 
+    # Plain-English Diagnostic Badge for each row ('✅ All 11 Passed' vs '⚠️ Missed: C7(52W High)')
+    def _build_diag(row: pd.Series) -> str:
+        if not active_ids:
+            return "⚪ No Active Rules"
+        missed = [SHORT_DIAGNOSTIC_LABELS[cid] for cid in active_ids if not row[f"{cid}_pass"]]
+        if not missed:
+            return f"✅ All {len(active_ids)} Passed"
+        if len(missed) == 1:
+            return f"⚠️ Missed: {missed[0]}"
+        if len(missed) <= 3:
+            return "❌ Missed: " + ", ".join(missed)
+        return f"❌ Missed {len(missed)}: " + ", ".join(missed[:2]) + "..."
+
+    df["diagnostic_badge"] = df.apply(_build_diag, axis=1)
+
     # Sort by Passed Count (desc), then RS Percentile (desc), then Market Cap (desc)
     df = df.sort_values(
         by=["passed_count", "rs_percentile", "market_cap_b"],
         ascending=[False, False, False],
     ).reset_index(drop=True)
+
+    near_miss_cnt = int((df["passed_count"] == max(1, len(active_ids) - 1)).sum()) if active_ids else 0
 
     summary_meta = {
         "active_condition_count": len(active_ids),
@@ -201,6 +257,8 @@ def evaluate_layer1_conditions(
         "lag_col_used": lag_col,
         "layer0_count": len(df),
         "qualified_count": int(df["qualified_all"].sum()),
+        "near_miss_count": near_miss_cnt,
+        "condition_bottlenecks": bottlenecks,
     }
     return df, summary_meta
 
@@ -222,6 +280,7 @@ def build_stock_condition_breakdown(
 
     details = [
         {
+            "Group": "Trend Stack",
             "Condition": "C1: Price > SMA150 & SMA200",
             "Enabled": bool(layer1_cfg.get("c1_enabled", True)),
             "Passed": bool(row.get("c1_pass", False)),
@@ -229,6 +288,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": "Close > SMA150 and SMA200",
         },
         {
+            "Group": "Trend Stack",
             "Condition": "C2: SMA150 > SMA200",
             "Enabled": bool(layer1_cfg.get("c2_enabled", True)),
             "Passed": bool(row.get("c2_pass", False)),
@@ -236,6 +296,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": "SMA150 > SMA200",
         },
         {
+            "Group": "Trend Stack",
             "Condition": f"C3: SMA200 Rising ({lookback_n}D Lookback)",
             "Enabled": bool(layer1_cfg.get("c3_enabled", True)),
             "Passed": bool(row.get("c3_pass", False)),
@@ -243,6 +304,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": f"SMA200 (Now) > SMA200 ({lookback_n}D Ago)",
         },
         {
+            "Group": "Trend Stack",
             "Condition": "C4: SMA50 > SMA150 > SMA200",
             "Enabled": bool(layer1_cfg.get("c4_enabled", True)),
             "Passed": bool(row.get("c4_pass", False)),
@@ -250,6 +312,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": "Perfect 50 > 150 > 200 Stacking",
         },
         {
+            "Group": "Trend Stack",
             "Condition": "C5: Price > SMA50",
             "Enabled": bool(layer1_cfg.get("c5_enabled", True)),
             "Passed": bool(row.get("c5_pass", False)),
@@ -257,6 +320,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": "Close > SMA50",
         },
         {
+            "Group": "52W & RS",
             "Condition": "C6: Price Cleared 52W Low",
             "Enabled": bool(layer1_cfg.get("c6_enabled", True)),
             "Passed": bool(row.get("c6_pass", False)),
@@ -264,6 +328,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": f">= +{min_above_low:.1f}% above 52W Low",
         },
         {
+            "Group": "52W & RS",
             "Condition": "C7: Price Near 52W High",
             "Enabled": bool(layer1_cfg.get("c7_enabled", True)),
             "Passed": bool(row.get("c7_pass", False)),
@@ -271,6 +336,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": f"Within {max_below_high:.1f}% of 52W High",
         },
         {
+            "Group": "52W & RS",
             "Condition": "C8: Relative Strength (RS) Percentile",
             "Enabled": bool(layer1_cfg.get("c8_enabled", True)),
             "Passed": bool(row.get("c8_pass", False)),
@@ -278,6 +344,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": f"RS Percentile >= {min_rs}",
         },
         {
+            "Group": "Swing & S&P",
             "Condition": "C9: Short-Term Alignment (SMA10 >= SMA20)",
             "Enabled": bool(layer1_cfg.get("c9_enabled", True)),
             "Passed": bool(row.get("c9_pass", False)),
@@ -285,6 +352,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": "SMA10 >= SMA20",
         },
         {
+            "Group": "Swing & S&P",
             "Condition": "C10: 1M Perf vs S&P 500 Benchmark",
             "Enabled": bool(layer1_cfg.get("c10_enabled", True)),
             "Passed": bool(row.get("c10_pass", False)),
@@ -292,6 +360,7 @@ def build_stock_condition_breakdown(
             "Required Threshold": f"> {y_1m:+.2f}%",
         },
         {
+            "Group": "Swing & S&P",
             "Condition": "C11: 6M Perf vs S&P 500 Benchmark",
             "Enabled": bool(layer1_cfg.get("c11_enabled", True)),
             "Passed": bool(row.get("c11_pass", False)),
