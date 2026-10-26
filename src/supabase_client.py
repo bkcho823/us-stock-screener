@@ -1,0 +1,160 @@
+"""
+Supabase Cloud Database Client (REST API via PostgREST)
+Uses standard `requests` + `SUPABASE_URL` and `SUPABASE_KEY` (from environment variables or Streamlit secrets).
+Requires zero extra heavy C-extensions and stores 0 MB on the local disk.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Dict, Any, List, Optional
+import requests
+
+
+def get_supabase_credentials() -> tuple[str, str]:
+    """
+    Retrieves SUPABASE_URL and SUPABASE_KEY from:
+    1. Environment variables (used by GitHub Actions or local .env)
+    2. Streamlit secrets (st.secrets, used by Streamlit Community Cloud)
+    """
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+
+    if not url or not key:
+        try:
+            import streamlit as st
+            if "SUPABASE_URL" in st.secrets:
+                url = str(st.secrets["SUPABASE_URL"]).strip()
+            if "SUPABASE_KEY" in st.secrets:
+                key = str(st.secrets["SUPABASE_KEY"]).strip()
+        except Exception:
+            pass
+
+    return url.rstrip("/"), key
+
+
+def is_supabase_configured() -> bool:
+    url, key = get_supabase_credentials()
+    return bool(url and key)
+
+
+def _headers(key: str, prefer: str = "") -> Dict[str, str]:
+    h = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        h["Prefer"] = prefer
+    return h
+
+
+def sb_upsert_kv(item_key: str, payload: Any) -> bool:
+    """Upserts a JSON object into `screener_kv_store` (used for EOD snapshot & S&P 500 benchmark)."""
+    url, key = get_supabase_credentials()
+    if not url or not key:
+        return False
+    endpoint = f"{url}/rest/v1/screener_kv_store"
+    body = {"key": item_key, "payload": payload}
+    resp = requests.post(
+        endpoint,
+        headers=_headers(key, prefer="resolution=merge-duplicates"),
+        json=body,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return True
+
+
+def sb_get_kv(item_key: str) -> Optional[Any]:
+    """Fetches a JSON payload by key from `screener_kv_store`."""
+    url, key = get_supabase_credentials()
+    if not url or not key:
+        return None
+    endpoint = f"{url}/rest/v1/screener_kv_store?key=eq.{item_key}&select=payload"
+    resp = requests.get(endpoint, headers=_headers(key), timeout=20)
+    resp.raise_for_status()
+    rows = resp.json()
+    if rows and isinstance(rows, list):
+        return rows[0].get("payload")
+    return None
+
+
+def sb_list_presets() -> Dict[str, Dict[str, Any]]:
+    """Loads all custom user presets from `screener_presets` table."""
+    url, key = get_supabase_credentials()
+    if not url or not key:
+        return {}
+    endpoint = f"{url}/rest/v1/screener_presets?select=name,description,layer0,layer1,saved_at_utc"
+    resp = requests.get(endpoint, headers=_headers(key), timeout=15)
+    resp.raise_for_status()
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in resp.json():
+        out[row["name"]] = {
+            "description": row.get("description", ""),
+            "layer0": row.get("layer0", {}),
+            "layer1": row.get("layer1", {}),
+            "saved_at_utc": row.get("saved_at_utc", ""),
+        }
+    return out
+
+
+def sb_upsert_preset(name: str, description: str, layer0: Dict[str, Any], layer1: Dict[str, Any], saved_at_utc: str) -> bool:
+    """Saves or updates a custom preset in `screener_presets`."""
+    url, key = get_supabase_credentials()
+    if not url or not key:
+        return False
+    endpoint = f"{url}/rest/v1/screener_presets"
+    body = {
+        "name": name,
+        "description": description,
+        "layer0": layer0,
+        "layer1": layer1,
+        "saved_at_utc": saved_at_utc,
+    }
+    resp = requests.post(
+        endpoint,
+        headers=_headers(key, prefer="resolution=merge-duplicates"),
+        json=body,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return True
+
+
+def sb_delete_preset(name: str) -> bool:
+    """Deletes a custom preset from `screener_presets`."""
+    url, key = get_supabase_credentials()
+    if not url or not key:
+        return False
+    endpoint = f"{url}/rest/v1/screener_presets?name=eq.{requests.utils.quote(name)}"
+    resp = requests.delete(endpoint, headers=_headers(key), timeout=15)
+    resp.raise_for_status()
+    return True
+
+
+def sb_insert_run_log(entry: Dict[str, Any]) -> bool:
+    """Inserts a screening run log into `screener_run_history`."""
+    url, key = get_supabase_credentials()
+    if not url or not key:
+        return False
+    endpoint = f"{url}/rest/v1/screener_run_history"
+    resp = requests.post(
+        endpoint,
+        headers=_headers(key, prefer="return=minimal"),
+        json={"run_id": entry["run_id"], "timestamp_utc": entry["timestamp_utc"], "payload": entry},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return True
+
+
+def sb_list_run_logs(limit: int = 200) -> List[Dict[str, Any]]:
+    """Fetches the most recent screening run logs from `screener_run_history`."""
+    url, key = get_supabase_credentials()
+    if not url or not key:
+        return []
+    endpoint = f"{url}/rest/v1/screener_run_history?select=payload&order=timestamp_utc.desc&limit={limit}"
+    resp = requests.get(endpoint, headers=_headers(key), timeout=15)
+    resp.raise_for_status()
+    return [r["payload"] for r in resp.json() if "payload" in r]

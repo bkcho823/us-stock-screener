@@ -9,7 +9,6 @@ from typing import Dict, Any, List
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 SNAPSHOT_FILE = DATA_DIR / "daily_snapshot.parquet"
 BENCHMARK_FILE = DATA_DIR / "benchmark_sp500.json"

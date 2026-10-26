@@ -1,13 +1,10 @@
-name: Daily EOD US Stock Screener Data Update
+name: Daily EOD US Stock Screener Data Update (Supabase Cloud DB)
 
 on:
   schedule:
-    # Runs Monday through Friday at 21:30 UTC (4:30 PM / 5:30 PM US Eastern Time, after US Market Close)
+    # Runs Monday through Friday at 21:30 UTC (after US Market Close)
     - cron: '30 21 * * 1-5'
   workflow_dispatch: # Allows manual 1-click trigger anytime in GitHub Actions tab
-
-permissions:
-  contents: write
 
 jobs:
   update-eod-snapshot:
@@ -28,14 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Fetch EOD US Universe, S&P 500 Benchmark & 252-Day Indicators
+      - name: Fetch EOD US Universe & Push Directly to Supabase Online DB
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python -m src.data_pipeline
-
-      - name: Commit and Push Updated Daily Snapshot
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add data/daily_snapshot.parquet data/benchmark_sp500.json
-          git diff --staged --quiet || git commit -m "chore(data): automated EOD market snapshot update [skip ci]"
-          git push

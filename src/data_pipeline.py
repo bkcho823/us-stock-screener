@@ -24,6 +24,11 @@ from src.config import (
     BASELINE_CACHE_MIN_MKT_CAP_B,
     BASELINE_CACHE_MIN_PRICE,
 )
+from src.supabase_client import (
+    is_supabase_configured,
+    sb_upsert_kv,
+    sb_get_kv,
+)
 
 TV_SCAN_URL = "https://scanner.tradingview.com/america/scan"
 
@@ -123,7 +128,11 @@ def fetch_sp500_benchmark() -> Dict[str, Any]:
         except Exception:
             pass
 
-    BENCHMARK_FILE.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    if is_supabase_configured():
+        try:
+            sb_upsert_kv("benchmark_sp500", result)
+        except Exception:
+            pass
     return result
 
 
@@ -376,9 +385,15 @@ def refresh_daily_market_data(
         df = enrich_with_yfinance_history(df, max_symbols_for_yf=0)
 
     if progress_callback:
-        progress_callback(0.95, "Saving daily EOD snapshot cache...")
+        progress_callback(0.95, "Saving daily EOD snapshot to Supabase Cloud DB...")
 
-    df.to_parquet(SNAPSHOT_FILE, index=False)
+    if is_supabase_configured():
+        try:
+            records = json.loads(df.to_json(orient="records"))
+            sb_upsert_kv("daily_snapshot", records)
+        except Exception as e:
+            print(f"Warning: Supabase snapshot upload failed: {e}")
+
     if progress_callback:
         progress_callback(1.0, "Market data refresh complete!")
 
@@ -386,19 +401,19 @@ def refresh_daily_market_data(
 
 
 def load_cached_market_data() -> Tuple[Optional[pd.DataFrame], Optional[Dict[str, Any]]]:
-    """Loads cached daily snapshot and S&P 500 benchmark if available."""
+    """Loads cached daily snapshot and S&P 500 benchmark from Supabase Cloud DB."""
     df = None
     benchmark = None
-    if SNAPSHOT_FILE.exists():
+    if is_supabase_configured():
         try:
-            df = pd.read_parquet(SNAPSHOT_FILE)
+            raw_records = sb_get_kv("daily_snapshot")
+            if raw_records and isinstance(raw_records, list):
+                df = pd.DataFrame(raw_records)
+            raw_bm = sb_get_kv("benchmark_sp500")
+            if raw_bm and isinstance(raw_bm, dict):
+                benchmark = raw_bm
         except Exception:
-            df = None
-    if BENCHMARK_FILE.exists():
-        try:
-            benchmark = json.loads(BENCHMARK_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            benchmark = None
+            pass
     return df, benchmark
 
 

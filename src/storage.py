@@ -1,28 +1,41 @@
 """
-Step 4: Preset Management & Run History Logger
-- Manages Built-in + Custom User Presets (Layer 0 + Layer 1 configurations)
-- Persists screening run logs (timestamp, S&P 500 1M/6M, candidate counts, passing tickers, settings)
+Step 4: Preset Management & Run History Logger (Supabase Cloud DB Edition)
+- Stores and retrieves Custom User Presets and Screening Run History in Supabase Online DB.
+- Uses 0 MB of local disk storage.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-from src.config import PRESETS_FILE, RUN_HISTORY_FILE, BUILTIN_PRESETS
+from src.config import BUILTIN_PRESETS
+from src.supabase_client import (
+    is_supabase_configured,
+    sb_list_presets,
+    sb_upsert_preset,
+    sb_delete_preset,
+    sb_insert_run_log,
+    sb_list_run_logs,
+)
+
+# In-memory session fallback when running without Supabase credentials configured yet
+_MEMORY_CUSTOM_PRESETS: Dict[str, Dict[str, Any]] = {}
+_MEMORY_RUN_HISTORY: List[Dict[str, Any]] = []
 
 
 def load_all_presets() -> Dict[str, Dict[str, Any]]:
-    """Returns built-in presets merged with any user-saved custom presets."""
+    """Returns built-in presets merged with user-saved custom presets from Supabase."""
     presets = {k: v for k, v in BUILTIN_PRESETS.items()}
-    if PRESETS_FILE.exists():
+    if is_supabase_configured():
         try:
-            custom = json.loads(PRESETS_FILE.read_text(encoding="utf-8"))
+            custom = sb_list_presets()
             if isinstance(custom, dict):
                 presets.update(custom)
         except Exception:
-            pass
+            presets.update(_MEMORY_CUSTOM_PRESETS)
+    else:
+        presets.update(_MEMORY_CUSTOM_PRESETS)
     return presets
 
 
@@ -32,49 +45,42 @@ def save_custom_preset(
     layer0_cfg: Dict[str, Any],
     layer1_cfg: Dict[str, Any],
 ) -> None:
-    """Saves or updates a custom preset to data/presets.json."""
-    custom: Dict[str, Any] = {}
-    if PRESETS_FILE.exists():
-        try:
-            custom = json.loads(PRESETS_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            custom = {}
-
-    custom[name] = {
+    """Saves or updates a custom preset in Supabase `screener_presets` table."""
+    saved_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    _MEMORY_CUSTOM_PRESETS[name] = {
         "description": description or "Custom user preset",
         "layer0": layer0_cfg,
         "layer1": layer1_cfg,
-        "saved_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "saved_at_utc": saved_at,
     }
-    PRESETS_FILE.write_text(json.dumps(custom, indent=2), encoding="utf-8")
+    if is_supabase_configured():
+        try:
+            sb_upsert_preset(name, description or "Custom user preset", layer0_cfg, layer1_cfg, saved_at)
+        except Exception:
+            pass
 
 
 def delete_custom_preset(name: str) -> bool:
-    """Deletes a custom preset if it is not a built-in preset."""
-    if name in BUILTIN_PRESETS or not PRESETS_FILE.exists():
+    """Deletes a custom preset from Supabase if it is not a built-in preset."""
+    if name in BUILTIN_PRESETS:
         return False
-    try:
-        custom = json.loads(PRESETS_FILE.read_text(encoding="utf-8"))
-        if name in custom:
-            del custom[name]
-            PRESETS_FILE.write_text(json.dumps(custom, indent=2), encoding="utf-8")
-            return True
-    except Exception:
-        pass
-    return False
+    _MEMORY_CUSTOM_PRESETS.pop(name, None)
+    if is_supabase_configured():
+        try:
+            return sb_delete_preset(name)
+        except Exception:
+            return False
+    return True
 
 
 def load_run_history() -> List[Dict[str, Any]]:
-    """Loads saved screening run history logs (newest first)."""
-    if not RUN_HISTORY_FILE.exists():
-        return []
-    try:
-        history = json.loads(RUN_HISTORY_FILE.read_text(encoding="utf-8"))
-        if isinstance(history, list):
-            return history
-    except Exception:
-        pass
-    return []
+    """Loads saved screening run history logs (newest first) from Supabase."""
+    if is_supabase_configured():
+        try:
+            return sb_list_run_logs(limit=200)
+        except Exception:
+            return _MEMORY_RUN_HISTORY
+    return _MEMORY_RUN_HISTORY
 
 
 def log_screening_run(
@@ -85,8 +91,7 @@ def log_screening_run(
     qualifying_tickers: List[str],
     elapsed_ms: float,
 ) -> Dict[str, Any]:
-    """Appends a new screening run record to data/run_history.json."""
-    history = load_run_history()
+    """Saves a new screening run record to Supabase `screener_run_history`."""
     entry = {
         "run_id": datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"),
         "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -105,7 +110,10 @@ def log_screening_run(
         "layer0_config": layer0_cfg,
         "layer1_config": layer1_cfg,
     }
-    history.insert(0, entry)
-    history = history[:200]  # Keep most recent 200 runs
-    RUN_HISTORY_FILE.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    _MEMORY_RUN_HISTORY.insert(0, entry)
+    if is_supabase_configured():
+        try:
+            sb_insert_run_log(entry)
+        except Exception:
+            pass
     return entry

@@ -8,6 +8,11 @@ __pycache__/
 venv/
 env/
 
+# Ignore any local data or secrets so 0 MB of data is stored locally or in git
+data/
+.streamlit/secrets.toml
+.env
+
 # OS / Editor files
 .DS_Store
 Thumbs.db
