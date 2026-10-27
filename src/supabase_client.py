@@ -1,14 +1,53 @@
 """
 Supabase Cloud Database Client (REST API via PostgREST)
 Uses standard `requests` + `SUPABASE_URL` and `SUPABASE_KEY` (from environment variables or Streamlit secrets).
-Requires zero extra heavy C-extensions and stores 0 MB on the local disk.
+Automatically normalizes SUPABASE_URL even if the user pasted a dashboard URL or '/rest/v1' suffix.
 """
 
 from __future__ import annotations
 
 import os
+import re
+from urllib.parse import urlparse
 from typing import Dict, Any, List, Optional
 import requests
+
+
+def _normalize_supabase_url(raw_url: str) -> str:
+    """
+    Ensures any Supabase URL format is converted to the clean base URL:
+    `https://<project_ref>.supabase.co`
+    Handles cases where the user pasted:
+    - `https://<ref>.supabase.co/rest/v1/...`
+    - `https://supabase.com/dashboard/project/<ref>...`
+    - `<ref>.supabase.co`
+    - `<ref>` (just the 20-char project ID)
+    """
+    u = (raw_url or "").strip().strip('"').strip("'")
+    if not u:
+        return ""
+
+    # Case 1: User pasted dashboard URL: https://supabase.com/dashboard/project/<ref>...
+    m_dash = re.search(r"supabase\.com/dashboard/project/([a-z0-9]+)", u, re.IGNORECASE)
+    if m_dash:
+        return f"https://{m_dash.group(1)}.supabase.co"
+
+    # Case 2: Standard <ref>.supabase.co anywhere in the string
+    m_host = re.search(r"([a-z0-9\-]+)\.supabase\.co", u, re.IGNORECASE)
+    if m_host:
+        return f"https://{m_host.group(1)}.supabase.co"
+
+    # Case 3: Just a bare 20-character project reference ID
+    if re.fullmatch(r"[a-z0-9]{15,30}", u):
+        return f"https://{u}.supabase.co"
+
+    # Fallback: keep only scheme + netloc
+    if not u.startswith("http"):
+        u = "https://" + u
+    parsed = urlparse(u)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return u.rstrip("/")
 
 
 def get_supabase_credentials() -> tuple[str, str]:
@@ -17,20 +56,20 @@ def get_supabase_credentials() -> tuple[str, str]:
     1. Environment variables (used by GitHub Actions or local .env)
     2. Streamlit secrets (st.secrets, used by Streamlit Community Cloud)
     """
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_KEY", "").strip()
+    raw_url = os.environ.get("SUPABASE_URL", "").strip()
+    key = os.environ.get("SUPABASE_KEY", "").strip().strip('"').strip("'")
 
-    if not url or not key:
+    if not raw_url or not key:
         try:
             import streamlit as st
-            if "SUPABASE_URL" in st.secrets:
-                url = str(st.secrets["SUPABASE_URL"]).strip()
-            if "SUPABASE_KEY" in st.secrets:
-                key = str(st.secrets["SUPABASE_KEY"]).strip()
+            if "SUPABASE_URL" in st.secrets and not raw_url:
+                raw_url = str(st.secrets["SUPABASE_URL"]).strip()
+            if "SUPABASE_KEY" in st.secrets and not key:
+                key = str(st.secrets["SUPABASE_KEY"]).strip().strip('"').strip("'")
         except Exception:
             pass
 
-    return url.rstrip("/"), key
+    return _normalize_supabase_url(raw_url), key
 
 
 def is_supabase_configured() -> bool:
@@ -64,8 +103,10 @@ def sb_upsert_kv(item_key: str, payload: Any) -> bool:
         timeout=45,
     )
     if not resp.ok:
-        raise RuntimeError(f"Supabase upsert '{item_key}' failed ({resp.status_code}): {resp.text}")
-    print(f"[Supabase] Successfully saved '{item_key}' to screener_kv_store.")
+        raise RuntimeError(
+            f"Supabase upsert '{item_key}' to '{endpoint}' failed ({resp.status_code}): {resp.text}"
+        )
+    print(f"[Supabase] Successfully saved '{item_key}' to screener_kv_store ({url}).")
     return True
 
 
