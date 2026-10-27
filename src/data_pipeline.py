@@ -388,11 +388,10 @@ def refresh_daily_market_data(
         progress_callback(0.95, "Saving daily EOD snapshot to Supabase Cloud DB...")
 
     if is_supabase_configured():
-        try:
-            records = json.loads(df.to_json(orient="records"))
-            sb_upsert_kv("daily_snapshot", records)
-        except Exception as e:
-            print(f"Warning: Supabase snapshot upload failed: {e}")
+        records = json.loads(df.to_json(orient="records"))
+        sb_upsert_kv("daily_snapshot", records)
+    else:
+        print("Notice: SUPABASE_URL / SUPABASE_KEY not configured in environment.")
 
     if progress_callback:
         progress_callback(1.0, "Market data refresh complete!")

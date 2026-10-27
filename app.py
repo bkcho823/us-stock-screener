@@ -1,7 +1,8 @@
 """
-Step 5 (Chief UI Designer Edition): Interactive Streamlit Web Dashboard (app.py)
+Step 5 (Chief UI Designer Edition + Supabase Cloud DB): Interactive Streamlit Web Dashboard (app.py)
 US Short/Mid-Term Breakout Stock Scoring & Ranking System — Layer 0 + Layer 1
 Features:
+- Reads/Writes to Supabase Online DB + caches in Streamlit Session RAM so it never loops on rerun
 - 100% Full-Width High-Density Watchlist Table with Visual Progress Bars & Plain-English Diagnostic Badges
 - Condition Bottleneck Bar (shows pass rate % for C1..C11 across the Layer 0 pool)
 - Sector Leadership Breakdown Pills with 1-Click Filtering
@@ -42,6 +43,7 @@ from src.storage import (
     load_run_history,
     log_screening_run,
 )
+from src.supabase_client import is_supabase_configured
 
 st.set_page_config(
     page_title="US Stock Momentum Screener — Trading Cockpit",
@@ -176,7 +178,6 @@ def _build_stock_plotly_chart(ticker: str, company_name: str, row: pd.Series) ->
                     )
                 )
     else:
-        # Fallback horizontal level comparison if network chart fetch is offline
         levels = ["52W Low", "SMA 200", "SMA 150", "SMA 50", "SMA 20", "SMA 10", "Current Close", "52W High"]
         vals = [
             row.get("low_52w", 0),
@@ -204,8 +205,16 @@ def _build_stock_plotly_chart(ticker: str, company_name: str, row: pd.Series) ->
 def main() -> None:
     _init_session_state()
 
-    # Load or initialize EOD market data
-    df_universe, sp500_bm = load_cached_market_data()
+    # 1. Check Session RAM first -> 2. Check Supabase Cloud DB -> 3. Live Fetch once into Session RAM
+    df_universe = st.session_state.get("cached_df_universe")
+    sp500_bm = st.session_state.get("cached_sp500_bm")
+
+    if df_universe is None or df_universe.empty or sp500_bm is None:
+        df_universe, sp500_bm = load_cached_market_data()
+        if df_universe is not None and not df_universe.empty and sp500_bm is not None:
+            st.session_state["cached_df_universe"] = df_universe
+            st.session_state["cached_sp500_bm"] = sp500_bm
+
     if df_universe is None or df_universe.empty or sp500_bm is None:
         st.info("Fetching initial US Market Universe & S&P 500 Benchmark...")
         progress_bar = st.progress(0, text="Starting initial EOD data fetch...")
@@ -214,8 +223,9 @@ def main() -> None:
             max_symbols_for_yf=800,
             progress_callback=lambda p, msg: progress_bar.progress(int(p * 100), text=msg),
         )
+        st.session_state["cached_df_universe"] = df_universe
+        st.session_state["cached_sp500_bm"] = sp500_bm
         progress_bar.empty()
-        st.rerun()
 
     # =========================================================================
     # SIDEBAR: Instant Preset Bar + Streamlined Layer 0 & Layer 1 Controls
@@ -283,7 +293,6 @@ def main() -> None:
                     step=5.0,
                 )
 
-            # Chief UI Designer Improvement: Sync All 5 Volume Horizons Toggle
             st.session_state["sync_volumes"] = st.toggle(
                 "Link All 5 Volume Horizons (1D–90D)",
                 value=bool(st.session_state.get("sync_volumes", True)),
@@ -428,11 +437,12 @@ def main() -> None:
     # =========================================================================
     # 1. COMPACT HEADER & FUNNEL RIBBON
     # =========================================================================
+    db_status = "🟢 Supabase Cloud Connected" if is_supabase_configured() else "🟡 Session RAM Mode (Add SUPABASE_URL & SUPABASE_KEY in Streamlit Secrets)"
     hdr_left, hdr_right = st.columns([3.2, 1.8])
     with hdr_left:
         st.markdown("## 📈 US Stock Momentum Screener — Trading Cockpit")
         st.caption(
-            f"**EOD Snapshot:** `{sp500_bm.get('as_of_date', 'Latest')}` · **Preset:** `{st.session_state['active_preset_name']}` · **Engine Speed:** `{elapsed_ms:.0f} ms`"
+            f"**EOD Snapshot:** `{sp500_bm.get('as_of_date', 'Latest')}` · **Storage:** {db_status} · **Speed:** `{elapsed_ms:.0f} ms`"
         )
     with hdr_right:
         btn_c1, btn_c2 = st.columns(2)
@@ -460,6 +470,8 @@ def main() -> None:
                     max_symbols_for_yf=800,
                     progress_callback=lambda p, msg: prog.progress(int(p * 100), text=msg),
                 )
+                st.session_state["cached_df_universe"] = df_universe
+                st.session_state["cached_sp500_bm"] = sp500_bm
                 prog.empty()
                 st.rerun()
 

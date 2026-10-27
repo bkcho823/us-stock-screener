@@ -53,16 +53,19 @@ def sb_upsert_kv(item_key: str, payload: Any) -> bool:
     """Upserts a JSON object into `screener_kv_store` (used for EOD snapshot & S&P 500 benchmark)."""
     url, key = get_supabase_credentials()
     if not url or not key:
+        print(f"[Supabase] Skipping upsert for '{item_key}': SUPABASE_URL or SUPABASE_KEY is empty.")
         return False
-    endpoint = f"{url}/rest/v1/screener_kv_store"
+    endpoint = f"{url}/rest/v1/screener_kv_store?on_conflict=key"
     body = {"key": item_key, "payload": payload}
     resp = requests.post(
         endpoint,
-        headers=_headers(key, prefer="resolution=merge-duplicates"),
+        headers=_headers(key, prefer="resolution=merge-duplicates,return=minimal"),
         json=body,
-        timeout=30,
+        timeout=45,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"Supabase upsert '{item_key}' failed ({resp.status_code}): {resp.text}")
+    print(f"[Supabase] Successfully saved '{item_key}' to screener_kv_store.")
     return True
 
 
@@ -72,7 +75,7 @@ def sb_get_kv(item_key: str) -> Optional[Any]:
     if not url or not key:
         return None
     endpoint = f"{url}/rest/v1/screener_kv_store?key=eq.{item_key}&select=payload"
-    resp = requests.get(endpoint, headers=_headers(key), timeout=20)
+    resp = requests.get(endpoint, headers=_headers(key), timeout=30)
     resp.raise_for_status()
     rows = resp.json()
     if rows and isinstance(rows, list):
@@ -104,7 +107,7 @@ def sb_upsert_preset(name: str, description: str, layer0: Dict[str, Any], layer1
     url, key = get_supabase_credentials()
     if not url or not key:
         return False
-    endpoint = f"{url}/rest/v1/screener_presets"
+    endpoint = f"{url}/rest/v1/screener_presets?on_conflict=name"
     body = {
         "name": name,
         "description": description,
@@ -114,7 +117,7 @@ def sb_upsert_preset(name: str, description: str, layer0: Dict[str, Any], layer1
     }
     resp = requests.post(
         endpoint,
-        headers=_headers(key, prefer="resolution=merge-duplicates"),
+        headers=_headers(key, prefer="resolution=merge-duplicates,return=minimal"),
         json=body,
         timeout=15,
     )
@@ -138,10 +141,10 @@ def sb_insert_run_log(entry: Dict[str, Any]) -> bool:
     url, key = get_supabase_credentials()
     if not url or not key:
         return False
-    endpoint = f"{url}/rest/v1/screener_run_history"
+    endpoint = f"{url}/rest/v1/screener_run_history?on_conflict=run_id"
     resp = requests.post(
         endpoint,
-        headers=_headers(key, prefer="return=minimal"),
+        headers=_headers(key, prefer="resolution=merge-duplicates,return=minimal"),
         json={"run_id": entry["run_id"], "timestamp_utc": entry["timestamp_utc"], "payload": entry},
         timeout=15,
     )
