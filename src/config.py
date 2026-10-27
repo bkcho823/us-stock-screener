@@ -17,6 +17,10 @@ RUN_HISTORY_FILE = DATA_DIR / "run_history.json"
 
 ALL_EXCHANGES: List[str] = ["NYSE", "NASDAQ", "AMEX"]
 
+# Optional TradingView saved chart layout ID or full URL for "BKCHO Chart"
+# (e.g. "abcd1234" from https://www.tradingview.com/chart/abcd1234/)
+DEFAULT_TV_LAYOUT_ID: str = ""
+
 # Baseline floor used when fetching the daily universe cache so the user can lower
 # Market Cap (e.g. from $3B down to $500M) or Volume in the UI and re-filter in <1s
 # without needing to re-download from the network.

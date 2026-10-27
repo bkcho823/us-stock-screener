@@ -1,27 +1,30 @@
 """
-Step 5 (TradingView Top-Pill Architecture + Supabase Cloud DB): Interactive Streamlit Web Dashboard (app.py)
+Step 5 (TradingView Top-Pill Architecture + Live Embedded TradingView Advanced Chart + Supabase Cloud DB)
 US Short/Mid-Term Breakout Stock Scoring & Ranking System — Layer 0 + Layer 1
 Features:
 - Zero Left Sidebar! 100% of filtering criteria placed at the TOP of the page as interactive TradingView-style filter pills (`st.popover`)
-- Row 1: Preset Dropdown + Action Buttons (Save Preset, Refresh Data)
+- Row 1: Preset Dropdown + Action Buttons (Save Preset, BKCHO Chart Layout ID Setting, Refresh Data)
 - Row 2 (Layer 0 Pills): US Market/Exchanges | Price >= $10 | Mkt Cap >= $3B | Vol 1D > 500K | Avg Vol 10D/30D/60D/90D > 500K | Price × Vol > $50M
 - Row 3 (Layer 1 Pills): C1..C8 Minervini Trend Template Pills | C9 SMA10 >= SMA20 | C10 1M Perf > Y% | C11 6M Perf > Y%
-- Compact Watchlist Table (half height: 235px) + Full-Width Interactive 1Y Daily Price + 5 Moving Averages Chart below on row click
+- Compact Watchlist Table (235px height)
+- Live Embedded TradingView Advanced Real-Time Chart Widget (`s3.tradingview.com/tv.js`) at the bottom + "Open in BKCHO Chart ↗" button
 """
 
 from __future__ import annotations
 
+import json
+import re
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
-import yfinance as yf
+import streamlit.components.v1 as components
 
 from src.config import (
     ALL_EXCHANGES,
     BUILTIN_PRESETS,
+    DEFAULT_TV_LAYOUT_ID,
     get_default_layer0_config,
     get_default_layer1_config,
     compute_dynamic_sp500_threshold,
@@ -38,7 +41,11 @@ from src.storage import (
     load_all_presets,
     save_custom_preset,
 )
-from src.supabase_client import is_supabase_configured
+from src.supabase_client import (
+    is_supabase_configured,
+    sb_get_kv,
+    sb_upsert_kv,
+)
 
 st.set_page_config(
     page_title="US Stock Screener — TradingView Pill Layout",
@@ -123,6 +130,89 @@ def _fmt_vol(val: int | float) -> str:
     return str(int(v))
 
 
+def _extract_tv_layout_id(raw_input: str) -> str:
+    """
+    Extracts the TradingView Layout ID from either a full URL like:
+    `https://www.tradingview.com/chart/AbCdEf12/?symbol=NASDAQ:BEAM`
+    or a bare layout ID like `AbCdEf12`.
+    """
+    s = (raw_input or "").strip()
+    if not s:
+        return ""
+    m = re.search(r"tradingview\.com/chart/([A-Za-z0-9_\-]+)", s)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[A-Za-z0-9_\-]{4,20}", s):
+        return s
+    return ""
+
+
+def _build_tv_chart_url(exchange: str, ticker: str, layout_id: str) -> str:
+    clean_id = _extract_tv_layout_id(layout_id)
+    sym_param = f"{exchange}%3A{ticker}"
+    if clean_id:
+        return f"https://www.tradingview.com/chart/{clean_id}/?symbol={sym_param}"
+    return f"https://www.tradingview.com/chart/?symbol={sym_param}"
+
+
+def _render_tradingview_advanced_chart(exchange: str, ticker: str, height: int = 500) -> None:
+    """
+    Renders the official live interactive TradingView Advanced Chart Widget (`s3.tradingview.com/tv.js`)
+    with Daily interval, Drawing Toolbar enabled, Volume, and Moving Averages pre-loaded.
+    """
+    tv_symbol = f"{exchange}:{ticker}"
+    widget_config = {
+        "autosize": True,
+        "symbol": tv_symbol,
+        "interval": "D",
+        "timezone": "Etc/UTC",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "enable_publishing": False,
+        "allow_symbol_change": True,
+        "hide_side_toolbar": False,
+        "withdateranges": True,
+        "details": False,
+        "hotlist": False,
+        "calendar": False,
+        "studies": [
+            {
+                "id": "MASimple@tv-basicstudies",
+                "inputs": {"length": 10},
+            },
+            {
+                "id": "MASimple@tv-basicstudies",
+                "inputs": {"length": 20},
+            },
+            {
+                "id": "MASimple@tv-basicstudies",
+                "inputs": {"length": 50},
+            },
+            {
+                "id": "MASimple@tv-basicstudies",
+                "inputs": {"length": 150},
+            },
+            {
+                "id": "MASimple@tv-basicstudies",
+                "inputs": {"length": 200},
+            },
+        ],
+        "container_id": "tv_advanced_chart_container",
+    }
+
+    html_code = f"""
+    <div class="tradingview-widget-container" style="height:{height}px;width:100%;">
+      <div id="tv_advanced_chart_container" style="height:{height - 10}px;width:100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget({json.dumps(widget_config)});
+      </script>
+    </div>
+    """
+    components.html(html_code, height=height)
+
+
 def _init_session_state() -> None:
     if "layer0_cfg" not in st.session_state:
         st.session_state["layer0_cfg"] = get_default_layer0_config()
@@ -130,8 +220,18 @@ def _init_session_state() -> None:
         st.session_state["layer1_cfg"] = get_default_layer1_config()
     if "active_preset_name" not in st.session_state:
         st.session_state["active_preset_name"] = list(BUILTIN_PRESETS.keys())[0]
-    if "inspected_ticker" not in st.session_state:
-        st.session_state["inspected_ticker"] = None
+    if "tv_layout_id" not in st.session_state:
+        saved_layout = DEFAULT_TV_LAYOUT_ID
+        if not saved_layout and is_supabase_configured():
+            try:
+                val = sb_get_kv("tv_layout_id")
+                if isinstance(val, str):
+                    saved_layout = val
+                elif isinstance(val, dict) and "layout_id" in val:
+                    saved_layout = str(val["layout_id"])
+            except Exception:
+                pass
+        st.session_state["tv_layout_id"] = saved_layout
 
 
 def _apply_preset_to_state(preset_name: str, presets: Dict[str, Dict[str, Any]]) -> None:
@@ -142,86 +242,6 @@ def _apply_preset_to_state(preset_name: str, presets: Dict[str, Dict[str, Any]])
         st.session_state["layer0_cfg"] = l0
         st.session_state["layer1_cfg"] = l1
         st.session_state["active_preset_name"] = preset_name
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_stock_1y_chart_data(ticker: str) -> Optional[pd.DataFrame]:
-    """Fetches 1 year of daily OHLCV via yfinance for the interactive Stock Cockpit chart."""
-    try:
-        yf_sym = ticker.replace(".", "-")
-        hist = yf.Ticker(yf_sym).history(period="18mo", interval="1d", auto_adjust=True)
-        if hist is None or hist.empty:
-            return None
-        hist = hist.dropna(subset=["Close"]).copy()
-        hist["SMA10"] = hist["Close"].rolling(10).mean()
-        hist["SMA20"] = hist["Close"].rolling(20).mean()
-        hist["SMA50"] = hist["Close"].rolling(50).mean()
-        hist["SMA150"] = hist["Close"].rolling(150).mean()
-        hist["SMA200"] = hist["Close"].rolling(200).mean()
-        return hist.tail(252)
-    except Exception:
-        return None
-
-
-def _build_stock_plotly_chart(ticker: str, company_name: str, row: pd.Series) -> go.Figure:
-    """Builds an interactive 1-Year Candlestick/Line + 5 Moving Averages (10/20/50/150/200) chart."""
-    hist = _fetch_stock_1y_chart_data(ticker)
-    fig = go.Figure()
-
-    if hist is not None and not hist.empty:
-        fig.add_trace(
-            go.Candlestick(
-                x=hist.index,
-                open=hist["Open"],
-                high=hist["High"],
-                low=hist["Low"],
-                close=hist["Close"],
-                name="Price",
-                increasing_line_color="#10b981",
-                decreasing_line_color="#ef4444",
-            )
-        )
-        ma_specs = [
-            ("SMA10", "#38bdf8", "dot", 1.3),
-            ("SMA20", "#a855f7", "dot", 1.3),
-            ("SMA50", "#f59e0b", "solid", 2.0),
-            ("SMA150", "#3b82f6", "solid", 2.0),
-            ("SMA200", "#ec4899", "solid", 2.4),
-        ]
-        for col, color, dash, width in ma_specs:
-            if col in hist.columns:
-                fig.add_trace(
-                    go.Scatter(
-                        x=hist.index,
-                        y=hist[col],
-                        mode="lines",
-                        name=col,
-                        line=dict(color=color, width=width, dash=dash),
-                    )
-                )
-    else:
-        levels = ["52W Low", "SMA 200", "SMA 150", "SMA 50", "SMA 20", "SMA 10", "Current Close", "52W High"]
-        vals = [
-            row.get("low_52w", 0),
-            row.get("sma_200", 0),
-            row.get("sma_150", 0),
-            row.get("sma_50", 0),
-            row.get("sma_20", 0),
-            row.get("sma_10", 0),
-            row.get("close", 0),
-            row.get("high_52w", 0),
-        ]
-        fig.add_trace(go.Bar(x=levels, y=vals, marker_color="#3b82f6"))
-
-    fig.update_layout(
-        title=f"{ticker} — {company_name} (1Y Daily Structure & SMA 10/20/50/150/200)",
-        height=400,
-        margin=dict(l=10, r=10, t=40, b=10),
-        xaxis_rangeslider_visible=False,
-        template="plotly_dark",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    )
-    return fig
 
 
 def main() -> None:
@@ -259,7 +279,7 @@ def main() -> None:
     # =========================================================================
     # TOP BAR ROW 1: TradingView-Style Title / Preset Dropdown + Actions
     # =========================================================================
-    top_c1, top_c2, top_c3, top_c4 = st.columns([3.2, 2.6, 1.2, 1.2])
+    top_c1, top_c2, top_c3, top_c4, top_c5 = st.columns([2.9, 2.3, 1.1, 1.35, 1.1])
     with top_c1:
         db_badge = "🟢 Supabase DB" if is_supabase_configured() else "🟡 Session RAM"
         st.markdown(f"### 📈 Stock Screener · <small>`{sp500_bm.get('as_of_date', 'EOD')}` ({db_badge})</small>", unsafe_allow_html=True)
@@ -288,6 +308,30 @@ def main() -> None:
                 st.toast(f"Saved preset: {new_preset_name.strip()}", icon="💾")
                 st.rerun()
     with top_c4:
+        cur_layout = _extract_tv_layout_id(st.session_state.get("tv_layout_id", ""))
+        layout_btn_lbl = f"⚙️ BKCHO Chart ({cur_layout})" if cur_layout else "⚙️ Set BKCHO Chart URL"
+        with st.popover(layout_btn_lbl, use_container_width=True):
+            st.markdown("**Link Your Personal 'BKCHO Chart' Layout**")
+            st.caption(
+                "Paste the URL from your TradingView browser address bar when viewing **BKCHO Chart** "
+                "(e.g. `https://www.tradingview.com/chart/AbCdEf12/`). Saved permanently to Supabase!"
+            )
+            raw_layout_in = st.text_input(
+                "BKCHO Chart URL or Layout ID",
+                value=st.session_state.get("tv_layout_id", ""),
+                placeholder="https://www.tradingview.com/chart/XXXXXXXX/",
+            )
+            if st.button("Save BKCHO Chart Layout", use_container_width=True, type="primary"):
+                extracted = _extract_tv_layout_id(raw_layout_in)
+                st.session_state["tv_layout_id"] = extracted
+                if is_supabase_configured():
+                    try:
+                        sb_upsert_kv("tv_layout_id", {"layout_id": extracted})
+                    except Exception:
+                        pass
+                st.toast(f"Saved BKCHO Chart Layout ID: {extracted or 'Default'}", icon="✅")
+                st.rerun()
+    with top_c5:
         if st.button("🔄 Refresh Data", use_container_width=True):
             prog = st.progress(0, text="Refreshing live market data...")
             df_universe, sp500_bm = refresh_daily_market_data(
@@ -568,7 +612,7 @@ def main() -> None:
         )
 
     # =========================================================================
-    # MAIN WATCHLIST & FULL-WIDTH CHART VIEW (No Tabs, Half-Height Table, No Scorecard Table)
+    # MAIN WATCHLIST & LIVE EMBEDDED TRADINGVIEW CHART
     # =========================================================================
     if df_scored.empty:
         st.warning("No stocks passed your current Layer 0 Pre-Filter pills above. Click any top filter pill (e.g. Mkt cap or Vol) to loosen the threshold.")
@@ -621,11 +665,10 @@ def main() -> None:
             ]
 
         df_view = df_view.reset_index(drop=True)
-        df_view["tv_url"] = (
-            "https://www.tradingview.com/chart/?symbol="
-            + df_view["exchange"].astype(str)
-            + "%3A"
-            + df_view["ticker"].astype(str)
+        active_layout_id = st.session_state.get("tv_layout_id", "")
+        df_view["tv_url"] = df_view.apply(
+            lambda r: _build_tv_chart_url(str(r["exchange"]), str(r["ticker"]), active_layout_id),
+            axis=1,
         )
 
         with tb4:
@@ -655,7 +698,6 @@ def main() -> None:
             "tv_url",
         ]
 
-        # Stock list height cut by half (from 470px down to 235px)
         selection_event = st.dataframe(
             df_view[display_cols],
             use_container_width=True,
@@ -687,11 +729,13 @@ def main() -> None:
                 "sector": st.column_config.TextColumn("Sector", width="medium"),
                 "pass_summary": st.column_config.TextColumn("Score", width="small"),
                 "diagnostic_badge": st.column_config.TextColumn("Status / Missed Rules", width="medium"),
-                "tv_url": st.column_config.LinkColumn("Chart", display_text="TradingView ↗"),
+                "tv_url": st.column_config.LinkColumn("BKCHO Chart", display_text="Open in TV ↗"),
             },
         )
 
-        # Full-Width Interactive 1Y Price + 5 Moving Averages Chart Below (Condition Table Removed)
+        # =====================================================================
+        # BOTTOM SECTION: LIVE EMBEDDED TRADINGVIEW ADVANCED CHART WIDGET
+        # =====================================================================
         if not df_view.empty:
             selected_rows = (
                 selection_event.selection.rows
@@ -706,23 +750,27 @@ def main() -> None:
             sel_ticker = str(inspected_row["ticker"])
             sel_name = str(inspected_row.get("company_name", ""))
             sel_exch = str(inspected_row.get("exchange", "NASDAQ"))
-            tv_link = f"https://www.tradingview.com/chart/?symbol={sel_exch}%3A{sel_ticker}"
+            tv_link = _build_tv_chart_url(sel_exch, sel_ticker, active_layout_id)
 
-            dr_hdr1, dr_hdr2 = st.columns([3.8, 1.2])
+            dr_hdr1, dr_hdr2 = st.columns([3.7, 1.3])
             with dr_hdr1:
                 st.markdown(
-                    f"#### 🔍 **{sel_ticker}** — {sel_name} "
+                    f"#### 📈 **{sel_exch}:{sel_ticker}** — {sel_name} "
                     f"(`{inspected_row['pass_summary']}` · `{inspected_row['diagnostic_badge']}`)"
                 )
             with dr_hdr2:
+                btn_label = (
+                    f"📈 Open {sel_ticker} in BKCHO Chart ↗"
+                    if _extract_tv_layout_id(active_layout_id)
+                    else f"📈 Open {sel_ticker} in TradingView ↗"
+                )
                 st.link_button(
-                    f"📈 Open {sel_ticker} in TradingView ↗",
+                    btn_label,
                     url=tv_link,
                     use_container_width=True,
                 )
 
-            fig = _build_stock_plotly_chart(sel_ticker, sel_name, inspected_row)
-            st.plotly_chart(fig, use_container_width=True)
+            _render_tradingview_advanced_chart(sel_exch, sel_ticker, height=500)
 
 
 if __name__ == "__main__":
