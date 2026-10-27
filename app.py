@@ -3,10 +3,10 @@ Step 5 (TradingView Top-Pill Architecture + Supabase Cloud DB): Interactive Stre
 US Short/Mid-Term Breakout Stock Scoring & Ranking System — Layer 0 + Layer 1
 Features:
 - Zero Left Sidebar! 100% of filtering criteria placed at the TOP of the page as interactive TradingView-style filter pills (`st.popover`)
-- Row 1: Preset Dropdown + Action Buttons (Save Preset, Log Run, Refresh Data)
+- Row 1: Preset Dropdown + Action Buttons (Save Preset, Refresh Data)
 - Row 2 (Layer 0 Pills): US Market/Exchanges | Price >= $10 | Mkt Cap >= $3B | Vol 1D > 500K | Avg Vol 10D/30D/60D/90D > 500K | Price × Vol > $50M
 - Row 3 (Layer 1 Pills): C1..C8 Minervini Trend Template Pills | C9 SMA10 >= SMA20 | C10 1M Perf > Y% | C11 6M Perf > Y%
-- Full-width Watchlist Table + Click-a-Row Docked Stock Cockpit Drawer (1Y Daily Price + 5 Moving Averages Chart & 11-Condition Scorecard)
+- Compact Watchlist Table (half height: 235px) + Full-Width Interactive 1Y Daily Price + 5 Moving Averages Chart below on row click
 """
 
 from __future__ import annotations
@@ -33,13 +33,10 @@ from src.data_pipeline import (
 from src.screener_engine import (
     apply_layer0_filter,
     evaluate_layer1_conditions,
-    build_stock_condition_breakdown,
 )
 from src.storage import (
     load_all_presets,
     save_custom_preset,
-    load_run_history,
-    log_screening_run,
 )
 from src.supabase_client import is_supabase_configured
 
@@ -60,7 +57,7 @@ st.markdown(
     }
     .block-container {
         padding-top: 1.0rem !important;
-        padding-bottom: 2.0rem !important;
+        padding-bottom: 1.5rem !important;
         max-width: 98% !important;
     }
     /* Style st.popover buttons to look like TradingView Filter Pills */
@@ -82,7 +79,7 @@ st.markdown(
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
-        margin: 4px 0 10px 0;
+        margin: 4px 0 8px 0;
     }
     .bn-chip {
         padding: 3px 8px;
@@ -218,7 +215,7 @@ def _build_stock_plotly_chart(ticker: str, company_name: str, row: pd.Series) ->
 
     fig.update_layout(
         title=f"{ticker} — {company_name} (1Y Daily Structure & SMA 10/20/50/150/200)",
-        height=420,
+        height=400,
         margin=dict(l=10, r=10, t=40, b=10),
         xaxis_rangeslider_visible=False,
         template="plotly_dark",
@@ -262,7 +259,7 @@ def main() -> None:
     # =========================================================================
     # TOP BAR ROW 1: TradingView-Style Title / Preset Dropdown + Actions
     # =========================================================================
-    top_c1, top_c2, top_c3, top_c4, top_c5 = st.columns([2.8, 2.2, 1.1, 1.1, 1.2])
+    top_c1, top_c2, top_c3, top_c4 = st.columns([3.2, 2.6, 1.2, 1.2])
     with top_c1:
         db_badge = "🟢 Supabase DB" if is_supabase_configured() else "🟡 Session RAM"
         st.markdown(f"### 📈 Stock Screener · <small>`{sp500_bm.get('as_of_date', 'EOD')}` ({db_badge})</small>", unsafe_allow_html=True)
@@ -291,8 +288,6 @@ def main() -> None:
                 st.toast(f"Saved preset: {new_preset_name.strip()}", icon="💾")
                 st.rerun()
     with top_c4:
-        log_clicked = st.button("📝 Log Run", use_container_width=True)
-    with top_c5:
         if st.button("🔄 Refresh Data", use_container_width=True):
             prog = st.progress(0, text="Refreshing live market data...")
             df_universe, sp500_bm = refresh_daily_market_data(
@@ -539,28 +534,10 @@ def main() -> None:
     # =========================================================================
     # EXECUTE INSTANT SCREENING (<1 SECOND)
     # =========================================================================
-    t_start = time.perf_counter()
     df_l0 = apply_layer0_filter(df_universe, st.session_state["layer0_cfg"])
     df_scored, summary_meta = evaluate_layer1_conditions(
         df_l0, st.session_state["layer1_cfg"], sp500_bm
     )
-    elapsed_ms = (time.perf_counter() - t_start) * 1000.0
-
-    if log_clicked:
-        q_tickers = (
-            df_scored[df_scored["qualified_all"]]["ticker"].tolist()
-            if not df_scored.empty
-            else []
-        )
-        log_screening_run(
-            preset_name=st.session_state["active_preset_name"],
-            layer0_cfg=st.session_state["layer0_cfg"],
-            layer1_cfg=st.session_state["layer1_cfg"],
-            summary_meta=summary_meta,
-            qualifying_tickers=q_tickers,
-            elapsed_ms=elapsed_ms,
-        )
-        st.toast("Screening run logged to Run History!", icon="✅")
 
     # =========================================================================
     # COMPACT BOTTLENECK DETECTOR & FUNNEL SUMMARY STRIP
@@ -591,227 +568,161 @@ def main() -> None:
         )
 
     # =========================================================================
-    # WORKSPACE TABS: Overview Watchlist vs. Historical Run Logs
+    # MAIN WATCHLIST & FULL-WIDTH CHART VIEW (No Tabs, Half-Height Table, No Scorecard Table)
     # =========================================================================
-    tab_cockpit, tab_history = st.tabs(
-        [
-            f"📊 Overview ({qual_cnt} Qualified · {near_cnt} Near-Misses · {l0_cnt} Layer 0 Pool)",
-            "📜 Historical Screening Run Logs",
-        ]
-    )
-
-    with tab_cockpit:
-        if df_scored.empty:
-            st.warning("No stocks passed your current Layer 0 Pre-Filter pills above. Click any top filter pill (e.g. Mkt cap or Vol) to loosen the threshold.")
-        else:
-            # One-Click Quick Filter Toolbar + Sector Leadership
-            tb1, tb2, tb3, tb4 = st.columns([2.6, 1.5, 1.3, 0.8])
-            with tb1:
-                view_mode = st.radio(
-                    "Watchlist View Mode",
-                    options=[
-                        f"🏆 Qualified ({active_cnt}/{active_cnt}) [{qual_cnt}]",
-                        f"🎯 Near-Miss ({max(0, active_cnt - 1)}/{active_cnt}) [{near_cnt}]",
-                        f"👀 Broad ({max(0, active_cnt - 2)}+) ",
-                        f"🌐 Full Layer 0 [{l0_cnt}]",
-                    ],
-                    horizontal=True,
-                    label_visibility="collapsed",
-                )
-            with tb2:
-                all_sectors = sorted(df_scored["sector"].dropna().unique().tolist())
-                selected_sectors = st.multiselect(
-                    "Filter by Sector",
-                    options=all_sectors,
-                    placeholder="All Sectors...",
-                    label_visibility="collapsed",
-                )
-            with tb3:
-                search_query = st.text_input(
-                    "Search Ticker / Company",
-                    placeholder="🔍 Symbol / Company (e.g. LLY, NVDA)...",
-                    label_visibility="collapsed",
-                )
-
-            if view_mode.startswith("🏆"):
-                df_view = df_scored[df_scored["qualified_all"]].copy()
-            elif view_mode.startswith("🎯"):
-                df_view = df_scored[df_scored["passed_count"] == max(0, active_cnt - 1)].copy()
-            elif view_mode.startswith("👀"):
-                df_view = df_scored[df_scored["passed_count"] >= max(0, active_cnt - 2)].copy()
-            else:
-                df_view = df_scored.copy()
-
-            if selected_sectors:
-                df_view = df_view[df_view["sector"].isin(selected_sectors)]
-
-            if search_query.strip():
-                q = search_query.strip().lower()
-                df_view = df_view[
-                    df_view["ticker"].str.lower().str.contains(q)
-                    | df_view["company_name"].fillna("").str.lower().str.contains(q)
-                ]
-
-            df_view = df_view.reset_index(drop=True)
-            df_view["tv_url"] = (
-                "https://www.tradingview.com/chart/?symbol="
-                + df_view["exchange"].astype(str)
-                + "%3A"
-                + df_view["ticker"].astype(str)
+    if df_scored.empty:
+        st.warning("No stocks passed your current Layer 0 Pre-Filter pills above. Click any top filter pill (e.g. Mkt cap or Vol) to loosen the threshold.")
+    else:
+        tb1, tb2, tb3, tb4 = st.columns([2.6, 1.5, 1.3, 0.8])
+        with tb1:
+            view_mode = st.radio(
+                "Watchlist View Mode",
+                options=[
+                    f"🏆 Qualified ({active_cnt}/{active_cnt}) [{qual_cnt}]",
+                    f"🎯 Near-Miss ({max(0, active_cnt - 1)}/{active_cnt}) [{near_cnt}]",
+                    f"👀 Broad ({max(0, active_cnt - 2)}+) ",
+                    f"🌐 Full Layer 0 [{l0_cnt}]",
+                ],
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+        with tb2:
+            all_sectors = sorted(df_scored["sector"].dropna().unique().tolist())
+            selected_sectors = st.multiselect(
+                "Filter by Sector",
+                options=all_sectors,
+                placeholder="All Sectors...",
+                label_visibility="collapsed",
+            )
+        with tb3:
+            search_query = st.text_input(
+                "Search Ticker / Company",
+                placeholder="🔍 Symbol / Company (e.g. LLY, NVDA)...",
+                label_visibility="collapsed",
             )
 
-            with tb4:
-                csv_bytes = df_view.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label=f"⬇️ CSV ({len(df_view)})",
-                    data=csv_bytes,
-                    file_name=f"watchlist_{sp500_bm.get('as_of_date', 'eod')}.csv",
-                    mime="text/csv",
+        if view_mode.startswith("🏆"):
+            df_view = df_scored[df_scored["qualified_all"]].copy()
+        elif view_mode.startswith("🎯"):
+            df_view = df_scored[df_scored["passed_count"] == max(0, active_cnt - 1)].copy()
+        elif view_mode.startswith("👀"):
+            df_view = df_scored[df_scored["passed_count"] >= max(0, active_cnt - 2)].copy()
+        else:
+            df_view = df_scored.copy()
+
+        if selected_sectors:
+            df_view = df_view[df_view["sector"].isin(selected_sectors)]
+
+        if search_query.strip():
+            q = search_query.strip().lower()
+            df_view = df_view[
+                df_view["ticker"].str.lower().str.contains(q)
+                | df_view["company_name"].fillna("").str.lower().str.contains(q)
+            ]
+
+        df_view = df_view.reset_index(drop=True)
+        df_view["tv_url"] = (
+            "https://www.tradingview.com/chart/?symbol="
+            + df_view["exchange"].astype(str)
+            + "%3A"
+            + df_view["ticker"].astype(str)
+        )
+
+        with tb4:
+            csv_bytes = df_view.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label=f"⬇️ CSV ({len(df_view)})",
+                data=csv_bytes,
+                file_name=f"watchlist_{sp500_bm.get('as_of_date', 'eod')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        display_cols = [
+            "ticker",
+            "company_name",
+            "close",
+            "vol_1d",
+            "market_cap_b",
+            "rs_percentile",
+            "perf_1m",
+            "perf_6m",
+            "pct_of_52w_high",
+            "dollar_vol_m",
+            "sector",
+            "pass_summary",
+            "diagnostic_badge",
+            "tv_url",
+        ]
+
+        # Stock list height cut by half (from 470px down to 235px)
+        selection_event = st.dataframe(
+            df_view[display_cols],
+            use_container_width=True,
+            height=235,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            column_config={
+                "ticker": st.column_config.TextColumn(f"Symbol ({len(df_view)})", width="small"),
+                "company_name": st.column_config.TextColumn("Company", width="medium"),
+                "close": st.column_config.NumberColumn("Price", format="$%.2f"),
+                "vol_1d": st.column_config.NumberColumn("Vol", format="%d"),
+                "market_cap_b": st.column_config.NumberColumn("Mkt cap", format="$%.2fB"),
+                "rs_percentile": st.column_config.ProgressColumn(
+                    "RS Rank",
+                    format="%d",
+                    min_value=1,
+                    max_value=99,
+                ),
+                "perf_1m": st.column_config.NumberColumn("Perf 1M", format="%+.2f%%"),
+                "perf_6m": st.column_config.NumberColumn("Perf 6M", format="%+.2f%%"),
+                "pct_of_52w_high": st.column_config.ProgressColumn(
+                    "% of 52W High",
+                    format="%.1f%%",
+                    min_value=0,
+                    max_value=100,
+                ),
+                "dollar_vol_m": st.column_config.NumberColumn("Price×Vol", format="$%.0fM"),
+                "sector": st.column_config.TextColumn("Sector", width="medium"),
+                "pass_summary": st.column_config.TextColumn("Score", width="small"),
+                "diagnostic_badge": st.column_config.TextColumn("Status / Missed Rules", width="medium"),
+                "tv_url": st.column_config.LinkColumn("Chart", display_text="TradingView ↗"),
+            },
+        )
+
+        # Full-Width Interactive 1Y Price + 5 Moving Averages Chart Below (Condition Table Removed)
+        if not df_view.empty:
+            selected_rows = (
+                selection_event.selection.rows
+                if selection_event and hasattr(selection_event, "selection")
+                else []
+            )
+            if selected_rows and selected_rows[0] < len(df_view):
+                inspected_row = df_view.iloc[selected_rows[0]]
+            else:
+                inspected_row = df_view.iloc[0]
+
+            sel_ticker = str(inspected_row["ticker"])
+            sel_name = str(inspected_row.get("company_name", ""))
+            sel_exch = str(inspected_row.get("exchange", "NASDAQ"))
+            tv_link = f"https://www.tradingview.com/chart/?symbol={sel_exch}%3A{sel_ticker}"
+
+            dr_hdr1, dr_hdr2 = st.columns([3.8, 1.2])
+            with dr_hdr1:
+                st.markdown(
+                    f"#### 🔍 **{sel_ticker}** — {sel_name} "
+                    f"(`{inspected_row['pass_summary']}` · `{inspected_row['diagnostic_badge']}`)"
+                )
+            with dr_hdr2:
+                st.link_button(
+                    f"📈 Open {sel_ticker} in TradingView ↗",
+                    url=tv_link,
                     use_container_width=True,
                 )
 
-            # =================================================================
-            # 100% FULL-WIDTH HIGH-DENSITY WATCHLIST TABLE (TradingView Style)
-            # =================================================================
-            display_cols = [
-                "ticker",
-                "company_name",
-                "close",
-                "vol_1d",
-                "market_cap_b",
-                "rs_percentile",
-                "perf_1m",
-                "perf_6m",
-                "pct_of_52w_high",
-                "dollar_vol_m",
-                "sector",
-                "pass_summary",
-                "diagnostic_badge",
-                "tv_url",
-            ]
-
-            selection_event = st.dataframe(
-                df_view[display_cols],
-                use_container_width=True,
-                height=470,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                column_config={
-                    "ticker": st.column_config.TextColumn(f"Symbol ({len(df_view)})", width="small"),
-                    "company_name": st.column_config.TextColumn("Company", width="medium"),
-                    "close": st.column_config.NumberColumn("Price", format="$%.2f"),
-                    "vol_1d": st.column_config.NumberColumn("Vol", format="%d"),
-                    "market_cap_b": st.column_config.NumberColumn("Mkt cap", format="$%.2fB"),
-                    "rs_percentile": st.column_config.ProgressColumn(
-                        "RS Rank",
-                        format="%d",
-                        min_value=1,
-                        max_value=99,
-                    ),
-                    "perf_1m": st.column_config.NumberColumn("Perf 1M", format="%+.2f%%"),
-                    "perf_6m": st.column_config.NumberColumn("Perf 6M", format="%+.2f%%"),
-                    "pct_of_52w_high": st.column_config.ProgressColumn(
-                        "% of 52W High",
-                        format="%.1f%%",
-                        min_value=0,
-                        max_value=100,
-                    ),
-                    "dollar_vol_m": st.column_config.NumberColumn("Price×Vol", format="$%.0fM"),
-                    "sector": st.column_config.TextColumn("Sector", width="medium"),
-                    "pass_summary": st.column_config.TextColumn("Score", width="small"),
-                    "diagnostic_badge": st.column_config.TextColumn("Status / Missed Rules", width="medium"),
-                    "tv_url": st.column_config.LinkColumn("Chart", display_text="TradingView ↗"),
-                },
-            )
-
-            # =================================================================
-            # DOCKED STOCK COCKPIT DRAWER (Below Full-Width Table)
-            # =================================================================
-            st.divider()
-            if not df_view.empty:
-                selected_rows = (
-                    selection_event.selection.rows
-                    if selection_event and hasattr(selection_event, "selection")
-                    else []
-                )
-                if selected_rows and selected_rows[0] < len(df_view):
-                    inspected_row = df_view.iloc[selected_rows[0]]
-                else:
-                    inspected_row = df_view.iloc[0]
-
-                sel_ticker = str(inspected_row["ticker"])
-                sel_name = str(inspected_row.get("company_name", ""))
-                sel_exch = str(inspected_row.get("exchange", "NASDAQ"))
-                tv_link = f"https://www.tradingview.com/chart/?symbol={sel_exch}%3A{sel_ticker}"
-
-                dr_hdr1, dr_hdr2 = st.columns([3.5, 1.5])
-                with dr_hdr1:
-                    st.markdown(
-                        f"### 🔍 Stock Cockpit Inspector: **{sel_ticker}** — {sel_name} "
-                        f"(`{inspected_row['pass_summary']}` · `{inspected_row['diagnostic_badge']}`)"
-                    )
-                with dr_hdr2:
-                    st.link_button(
-                        f"📈 Open {sel_ticker} Full Chart in TradingView ↗",
-                        url=tv_link,
-                        use_container_width=True,
-                    )
-
-                cockpit_left, cockpit_right = st.columns([1.25, 1.0])
-                with cockpit_left:
-                    fig = _build_stock_plotly_chart(sel_ticker, sel_name, inspected_row)
-                    st.plotly_chart(fig, use_container_width=True)
-
-                with cockpit_right:
-                    breakdown = build_stock_condition_breakdown(
-                        inspected_row, st.session_state["layer1_cfg"], summary_meta
-                    )
-                    df_bd = pd.DataFrame(breakdown)
-                    df_bd["Result"] = df_bd.apply(
-                        lambda r: "⚪ OFF"
-                        if not r["Enabled"]
-                        else ("✅ PASS" if r["Passed"] else "❌ FAIL"),
-                        axis=1,
-                    )
-                    st.dataframe(
-                        df_bd[["Condition", "Result", "Stock Value", "Required Threshold"]],
-                        use_container_width=True,
-                        hide_index=True,
-                        height=405,
-                    )
-
-    with tab_history:
-        st.subheader("📜 Past Screening Run Logs & Market Breadth History")
-        history = load_run_history()
-        if not history:
-            st.info("No screening runs logged yet. Click **'📝 Log Run'** at the top right to record daily snapshots.")
-        else:
-            df_hist = pd.DataFrame(history)
-            df_hist["Top Qualifying Tickers"] = df_hist["top_tickers"].apply(
-                lambda lst: ", ".join(lst[:12]) + ("..." if len(lst) > 12 else "")
-                if isinstance(lst, list)
-                else ""
-            )
-            st.dataframe(
-                df_hist[
-                    [
-                        "timestamp_utc",
-                        "preset_name",
-                        "min_market_cap_b",
-                        "layer0_candidates",
-                        "layer1_qualified",
-                        "active_conditions",
-                        "sp500_1m_pct",
-                        "y_1m_threshold_pct",
-                        "sp500_6m_pct",
-                        "y_6m_threshold_pct",
-                        "Top Qualifying Tickers",
-                    ]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
+            fig = _build_stock_plotly_chart(sel_ticker, sel_name, inspected_row)
+            st.plotly_chart(fig, use_container_width=True)
 
 
 if __name__ == "__main__":
