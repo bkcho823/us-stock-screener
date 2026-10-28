@@ -62,18 +62,24 @@ st.markdown(
     [data-testid="stSidebar"], [data-testid="collapsedControl"] {
         display: none !important;
     }
+    /* Make top Streamlit header bar transparent and give top row safe clearance */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 2.5rem !important;
+    }
     .block-container {
-        padding-top: 1.0rem !important;
+        padding-top: 3.2rem !important;
         padding-bottom: 1.5rem !important;
         max-width: 98% !important;
     }
-    /* Style st.popover buttons to look like TradingView Filter Pills */
+    /* Style st.popover buttons to look like TradingView Filter Pills (prevent text truncation) */
     div[data-testid="stPopover"] > div > button {
         border-radius: 8px !important;
-        padding: 0.25rem 0.65rem !important;
-        min-height: 2.2rem !important;
-        font-size: 0.82rem !important;
+        padding: 0.2rem 0.5rem !important;
+        min-height: 2.15rem !important;
+        font-size: 0.78rem !important;
         font-weight: 600 !important;
+        white-space: nowrap !important;
         border: 1px solid rgba(255, 255, 255, 0.22) !important;
         background-color: rgba(30, 41, 59, 0.85) !important;
         transition: all 0.15s ease-in-out !important;
