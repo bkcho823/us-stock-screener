@@ -219,6 +219,54 @@ def _render_tradingview_advanced_chart(exchange: str, ticker: str, height: int =
     components.html(html_code, height=height)
 
 
+def _inject_keyboard_row_navigation() -> None:
+    """
+    Binds global keyboard shortcuts on the parent Streamlit document:
+    - PageUp       -> Clicks the '◀ Prev' button (moves highlight & chart up 1 row)
+    - PageDown     -> Clicks the 'Next ▶' button (moves highlight & chart down 1 row)
+    - Spacebar     -> Clicks the 'Next ▶' button (unless typing inside an input/textarea)
+    """
+    js_code = """
+    <script>
+    (function() {
+        const parentDoc = window.parent.document;
+        if (parentDoc.__usStockKeyNavBound) return;
+        parentDoc.__usStockKeyNavBound = true;
+
+        parentDoc.addEventListener('keydown', function(e) {
+            const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
+            const isEditable = (
+                tag === 'INPUT' ||
+                tag === 'TEXTAREA' ||
+                tag === 'SELECT' ||
+                (e.target && e.target.isContentEditable)
+            );
+            if (isEditable) return;
+
+            if (e.key === 'PageDown' || e.code === 'Space' || e.key === ' ') {
+                const buttons = Array.from(parentDoc.querySelectorAll('button'));
+                const nextBtn = buttons.find(b => b.innerText && b.innerText.includes('Next ▶'));
+                if (nextBtn && !nextBtn.disabled) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    nextBtn.click();
+                }
+            } else if (e.key === 'PageUp') {
+                const buttons = Array.from(parentDoc.querySelectorAll('button'));
+                const prevBtn = buttons.find(b => b.innerText && b.innerText.includes('◀ Prev'));
+                if (prevBtn && !prevBtn.disabled) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    prevBtn.click();
+                }
+            }
+        }, true);
+    })();
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
+
 def _init_session_state() -> None:
     if "layer0_cfg" not in st.session_state:
         st.session_state["layer0_cfg"] = get_default_layer0_config()
@@ -226,6 +274,10 @@ def _init_session_state() -> None:
         st.session_state["layer1_cfg"] = get_default_layer1_config()
     if "active_preset_name" not in st.session_state:
         st.session_state["active_preset_name"] = list(BUILTIN_PRESETS.keys())[0]
+    if "active_row_idx" not in st.session_state:
+        st.session_state["active_row_idx"] = 0
+    if "last_table_sel" not in st.session_state:
+        st.session_state["last_table_sel"] = []
     if "tv_layout_id" not in st.session_state:
         saved_layout = DEFAULT_TV_LAYOUT_ID
         if not saved_layout and is_supabase_configured():
@@ -351,123 +403,7 @@ def main() -> None:
             st.rerun()
 
     # =========================================================================
-    # TOP FILTER PILLS — ROW 1: LAYER 0 UNIVERSE PRE-FILTER (TradingView Style)
-    # =========================================================================
-    r1_c1, r1_c2, r1_c3, r1_c4, r1_c5, r1_c6, r1_c7, r1_c8, r1_c9 = st.columns(
-        [1.15, 1.15, 1.25, 1.1, 1.25, 1.25, 1.25, 1.25, 1.35]
-    )
-
-    with r1_c1:
-        ex_count = len(l0.get("exchanges", ALL_EXCHANGES))
-        ex_label = "🇺🇸 US" if ex_count == 3 else f"🇺🇸 US ({ex_count})"
-        with st.popover(ex_label, use_container_width=True):
-            st.markdown("**Market & Security Type**")
-            l0["exchanges"] = st.multiselect(
-                "US Exchanges",
-                options=ALL_EXCHANGES,
-                default=l0.get("exchanges", ALL_EXCHANGES),
-            )
-            l0["exclude_etfs"] = st.toggle("Exclude ETFs / Funds", value=bool(l0.get("exclude_etfs", True)))
-            l0["include_adrs"] = st.toggle("Include Foreign ADRs", value=bool(l0.get("include_adrs", True)))
-
-    with r1_c2:
-        with st.popover(f"Price ≥ {l0['min_price']:.0f} USD", use_container_width=True):
-            l0["min_price"] = st.number_input(
-                "Minimum Share Price (USD)",
-                min_value=1.0,
-                max_value=1000.0,
-                value=float(l0.get("min_price", 10.0)),
-                step=1.0,
-            )
-
-    with r1_c3:
-        mc_label = (
-            f"Mkt cap ≥ {l0['min_market_cap_b']:g} B USD"
-            if float(l0.get("max_market_cap_b", 0.0)) <= 0
-            else f"Mkt cap {l0['min_market_cap_b']:g}–{l0['max_market_cap_b']:g}B"
-        )
-        with st.popover(mc_label, use_container_width=True):
-            l0["min_market_cap_b"] = st.number_input(
-                "Min Market Cap ($ Billions)",
-                min_value=0.1,
-                max_value=500.0,
-                value=float(l0.get("min_market_cap_b", 3.0)),
-                step=0.5,
-            )
-            l0["max_market_cap_b"] = st.number_input(
-                "Max Market Cap ($B, 0 = No Limit)",
-                min_value=0.0,
-                max_value=5000.0,
-                value=float(l0.get("max_market_cap_b", 0.0)),
-                step=5.0,
-            )
-
-    with r1_c4:
-        with st.popover(f"Vol > {_fmt_vol(l0['min_vol_1d'])}", use_container_width=True):
-            l0["min_vol_1d"] = st.number_input(
-                "Current Day Volume (1D Shares)",
-                min_value=0,
-                max_value=50_000_000,
-                value=int(l0.get("min_vol_1d", 500_000)),
-                step=50_000,
-            )
-            if st.button("Apply this volume to 10D/30D/60D/90D", use_container_width=True):
-                v = int(l0["min_vol_1d"])
-                l0["min_vol_10d"] = l0["min_vol_30d"] = l0["min_vol_60d"] = l0["min_vol_90d"] = v
-                st.rerun()
-
-    with r1_c5:
-        with st.popover(f"Avg vol, 10D > {_fmt_vol(l0['min_vol_10d'])}", use_container_width=True):
-            l0["min_vol_10d"] = st.number_input(
-                "10-Day Average Volume (Shares)",
-                min_value=0,
-                max_value=50_000_000,
-                value=int(l0.get("min_vol_10d", 500_000)),
-                step=50_000,
-            )
-
-    with r1_c6:
-        with st.popover(f"Avg vol, 30D > {_fmt_vol(l0['min_vol_30d'])}", use_container_width=True):
-            l0["min_vol_30d"] = st.number_input(
-                "30-Day Average Volume (Shares)",
-                min_value=0,
-                max_value=50_000_000,
-                value=int(l0.get("min_vol_30d", 500_000)),
-                step=50_000,
-            )
-
-    with r1_c7:
-        with st.popover(f"Avg vol, 60D > {_fmt_vol(l0['min_vol_60d'])}", use_container_width=True):
-            l0["min_vol_60d"] = st.number_input(
-                "60-Day Average Volume (Shares)",
-                min_value=0,
-                max_value=50_000_000,
-                value=int(l0.get("min_vol_60d", 500_000)),
-                step=50_000,
-            )
-
-    with r1_c8:
-        with st.popover(f"Avg vol, 90D > {_fmt_vol(l0['min_vol_90d'])}", use_container_width=True):
-            l0["min_vol_90d"] = st.number_input(
-                "90-Day Average Volume (Shares)",
-                min_value=0,
-                max_value=50_000_000,
-                value=int(l0.get("min_vol_90d", 500_000)),
-                step=50_000,
-            )
-
-    with r1_c9:
-        with st.popover(f"Price × vol > {l0['min_dollar_vol_m']:g} M USD", use_container_width=True):
-            l0["min_dollar_vol_m"] = st.number_input(
-                "Min Daily Dollar Volume ($ Millions)",
-                min_value=0.0,
-                max_value=1000.0,
-                value=float(l0.get("min_dollar_vol_m", 50.0)),
-                step=5.0,
-            )
-
-    # =========================================================================
-    # TOP FILTER PILLS — ROW 2: LAYER 1 TREND & MOMENTUM PILLS (11 Conditions)
+    # TOP FILTER PILLS — 100% OF LAYER 0 (11 PILLS) & LAYER 1 (11 PILLS) VISIBLE
     # =========================================================================
     y_1m_preview = compute_dynamic_sp500_threshold(
         sp_1m,
@@ -484,21 +420,129 @@ def main() -> None:
         float(l1.get("c11_manual_min_pct", 24.0)),
     )
 
-    r2_c1, r2_c2, r2_c3, r2_c4, r2_c5, r2_c6, r2_c7, r2_c8 = st.columns(
-        [1.35, 1.35, 1.25, 1.3, 1.35, 1.35, 1.2, 1.45]
-    )
+    # --- ROW 1 (6 Wide Layer 0 Pills: Exchanges, ETFs, ADRs, Price, Mkt Cap, Dollar Vol) ---
+    l0_r1 = st.columns(6)
+    with l0_r1[0]:
+        ex_list = l0.get("exchanges", ALL_EXCHANGES)
+        ex_lbl = "🇺🇸 US (NYSE/NASD/AMEX)" if len(ex_list) == 3 else f"🇺🇸 Exchanges ({len(ex_list)})"
+        with st.popover(ex_lbl, use_container_width=True):
+            l0["exchanges"] = st.multiselect(
+                "US Exchanges",
+                options=ALL_EXCHANGES,
+                default=ex_list,
+            )
+    with l0_r1[1]:
+        etf_lbl = "✅ Exclude ETFs: ON" if l0.get("exclude_etfs", True) else "⚪ Exclude ETFs: OFF"
+        with st.popover(etf_lbl, use_container_width=True):
+            l0["exclude_etfs"] = st.toggle("Exclude ETFs / Funds", value=bool(l0.get("exclude_etfs", True)))
+    with l0_r1[2]:
+        adr_lbl = "✅ Include ADRs: ON" if l0.get("include_adrs", True) else "⚪ Include ADRs: OFF"
+        with st.popover(adr_lbl, use_container_width=True):
+            l0["include_adrs"] = st.toggle("Include Foreign ADRs", value=bool(l0.get("include_adrs", True)))
+    with l0_r1[3]:
+        with st.popover(f"Price ≥ ${l0['min_price']:.0f} USD", use_container_width=True):
+            l0["min_price"] = st.number_input(
+                "Minimum Share Price (USD)",
+                min_value=1.0,
+                max_value=1000.0,
+                value=float(l0.get("min_price", 10.0)),
+                step=1.0,
+            )
+    with l0_r1[4]:
+        mc_label = (
+            f"Mkt cap ≥ ${l0['min_market_cap_b']:g}B"
+            if float(l0.get("max_market_cap_b", 0.0)) <= 0
+            else f"Mkt cap ${l0['min_market_cap_b']:g}B–${l0['max_market_cap_b']:g}B"
+        )
+        with st.popover(mc_label, use_container_width=True):
+            l0["min_market_cap_b"] = st.number_input(
+                "Min Market Cap ($ Billions)",
+                min_value=0.1,
+                max_value=500.0,
+                value=float(l0.get("min_market_cap_b", 3.0)),
+                step=0.5,
+            )
+            l0["max_market_cap_b"] = st.number_input(
+                "Max Market Cap ($B, 0 = No Limit)",
+                min_value=0.0,
+                max_value=5000.0,
+                value=float(l0.get("max_market_cap_b", 0.0)),
+                step=5.0,
+            )
+    with l0_r1[5]:
+        with st.popover(f"Price × Vol > ${l0['min_dollar_vol_m']:g}M", use_container_width=True):
+            l0["min_dollar_vol_m"] = st.number_input(
+                "Min Daily Dollar Volume ($ Millions)",
+                min_value=0.0,
+                max_value=1000.0,
+                value=float(l0.get("min_dollar_vol_m", 50.0)),
+                step=5.0,
+            )
 
-    with r2_c1:
-        p_c1 = "✅ SMA 150/200 < Price" if l1["c1_enabled"] else "⚪ SMA 150/200 < Price"
+    # --- ROW 2 (5 Wide Layer 0 Volume Pills: 1D, 10D, 30D, 60D, 90D) ---
+    l0_r2 = st.columns(5)
+    with l0_r2[0]:
+        with st.popover(f"Vol (1D) > {_fmt_vol(l0['min_vol_1d'])}", use_container_width=True):
+            l0["min_vol_1d"] = st.number_input(
+                "Current Day Volume (1D Shares)",
+                min_value=0,
+                max_value=50_000_000,
+                value=int(l0.get("min_vol_1d", 500_000)),
+                step=50_000,
+            )
+            if st.button("Apply to all 10D/30D/60D/90D", use_container_width=True):
+                v = int(l0["min_vol_1d"])
+                l0["min_vol_10d"] = l0["min_vol_30d"] = l0["min_vol_60d"] = l0["min_vol_90d"] = v
+                st.rerun()
+    with l0_r2[1]:
+        with st.popover(f"Avg Vol 10D > {_fmt_vol(l0['min_vol_10d'])}", use_container_width=True):
+            l0["min_vol_10d"] = st.number_input(
+                "10-Day Average Volume (Shares)",
+                min_value=0,
+                max_value=50_000_000,
+                value=int(l0.get("min_vol_10d", 500_000)),
+                step=50_000,
+            )
+    with l0_r2[2]:
+        with st.popover(f"Avg Vol 30D > {_fmt_vol(l0['min_vol_30d'])}", use_container_width=True):
+            l0["min_vol_30d"] = st.number_input(
+                "30-Day Average Volume (Shares)",
+                min_value=0,
+                max_value=50_000_000,
+                value=int(l0.get("min_vol_30d", 500_000)),
+                step=50_000,
+            )
+    with l0_r2[3]:
+        with st.popover(f"Avg Vol 60D > {_fmt_vol(l0['min_vol_60d'])}", use_container_width=True):
+            l0["min_vol_60d"] = st.number_input(
+                "60-Day Average Volume (Shares)",
+                min_value=0,
+                max_value=50_000_000,
+                value=int(l0.get("min_vol_60d", 500_000)),
+                step=50_000,
+            )
+    with l0_r2[4]:
+        with st.popover(f"Avg Vol 90D > {_fmt_vol(l0['min_vol_90d'])}", use_container_width=True):
+            l0["min_vol_90d"] = st.number_input(
+                "90-Day Average Volume (Shares)",
+                min_value=0,
+                max_value=50_000_000,
+                value=int(l0.get("min_vol_90d", 500_000)),
+                step=50_000,
+            )
+
+    # --- ROW 3 (6 Wide Layer 1 Trend Pills: C1, C2, C3, C4, C5, C9) ---
+    l1_r1 = st.columns(6)
+    with l1_r1[0]:
+        p_c1 = "✅ C1: P > SMA150/200" if l1["c1_enabled"] else "⚪ C1: P > SMA150/200"
         with st.popover(p_c1, use_container_width=True):
             l1["c1_enabled"] = st.toggle("Enable C1: Price > SMA 150 & SMA 200", value=bool(l1.get("c1_enabled", True)))
-            st.markdown("---")
+    with l1_r1[1]:
+        p_c2 = "✅ C2: SMA150 > 200" if l1["c2_enabled"] else "⚪ C2: SMA150 > 200"
+        with st.popover(p_c2, use_container_width=True):
             l1["c2_enabled"] = st.toggle("Enable C2: SMA 150 > SMA 200", value=bool(l1.get("c2_enabled", True)))
-            l1["c4_enabled"] = st.toggle("Enable C4: SMA 50 > SMA 150 > SMA 200", value=bool(l1.get("c4_enabled", True)))
-            l1["c5_enabled"] = st.toggle("Enable C5: Price > SMA 50", value=bool(l1.get("c5_enabled", True)))
-
-    with r2_c2:
-        p_c3 = f"✅ SMA 200 ↑ ({l1['c3_lookback_days']}D)" if l1["c3_enabled"] else "⚪ SMA 200 ↑ (OFF)"
+    with l1_r1[2]:
+        p_c3 = f"✅ C3: SMA200 ↑ ({l1['c3_lookback_days']}D)" if l1["c3_enabled"] else "⚪ C3: SMA200 ↑ (OFF)"
         with st.popover(p_c3, use_container_width=True):
             l1["c3_enabled"] = st.toggle("Enable C3: SMA 200 Trending Upward", value=bool(l1.get("c3_enabled", True)))
             l1["c3_lookback_days"] = st.select_slider(
@@ -508,14 +552,55 @@ def main() -> None:
                 if int(l1.get("c3_lookback_days", 20)) in [5, 10, 15, 20, 30, 40, 60]
                 else 20,
             )
-
-    with r2_c3:
-        p_c9 = "✅ SMA, 10 ≥ SMA, 20" if l1["c9_enabled"] else "⚪ SMA, 10 ≥ SMA, 20"
+    with l1_r1[3]:
+        p_c4 = "✅ C4: 50 > 150 > 200" if l1["c4_enabled"] else "⚪ C4: 50 > 150 > 200"
+        with st.popover(p_c4, use_container_width=True):
+            l1["c4_enabled"] = st.toggle("Enable C4: SMA 50 > SMA 150 > SMA 200", value=bool(l1.get("c4_enabled", True)))
+    with l1_r1[4]:
+        p_c5 = "✅ C5: Price > SMA50" if l1["c5_enabled"] else "⚪ C5: Price > SMA50"
+        with st.popover(p_c5, use_container_width=True):
+            l1["c5_enabled"] = st.toggle("Enable C5: Price > SMA 50", value=bool(l1.get("c5_enabled", True)))
+    with l1_r1[5]:
+        p_c9 = "✅ C9: SMA10 ≥ SMA20" if l1["c9_enabled"] else "⚪ C9: SMA10 ≥ SMA20"
         with st.popover(p_c9, use_container_width=True):
-            l1["c9_enabled"] = st.toggle("Enable C9: Short-Term Swing Alignment (SMA 10 ≥ SMA 20)", value=bool(l1.get("c9_enabled", True)))
+            l1["c9_enabled"] = st.toggle("Enable C9: Short-Term Alignment (SMA 10 ≥ SMA 20)", value=bool(l1.get("c9_enabled", True)))
 
-    with r2_c4:
-        p_c10 = f"✅ Perf, 1M > {y_1m_preview:+.1f}%" if l1["c10_enabled"] else "⚪ Perf, 1M (OFF)"
+    # --- ROW 4 (5 Wide Layer 1 Momentum & 52W Pills: C6, C7, C8, C10, C11) ---
+    l1_r2 = st.columns(5)
+    with l1_r2[0]:
+        p_c6 = f"✅ C6: 52W Low +{l1['c6_min_pct_above_52w_low']:g}%" if l1["c6_enabled"] else "⚪ C6: 52W Low (OFF)"
+        with st.popover(p_c6, use_container_width=True):
+            l1["c6_enabled"] = st.toggle("Enable C6: Price Cleared 52-Week Low", value=bool(l1.get("c6_enabled", True)))
+            l1["c6_min_pct_above_52w_low"] = st.number_input(
+                "Min % Above 52-Week Low",
+                min_value=0.0,
+                max_value=300.0,
+                value=float(l1.get("c6_min_pct_above_52w_low", 30.0)),
+                step=5.0,
+            )
+    with l1_r2[1]:
+        p_c7 = f"✅ C7: 52W High -{l1['c7_max_pct_below_52w_high']:g}%" if l1["c7_enabled"] else "⚪ C7: 52W High (OFF)"
+        with st.popover(p_c7, use_container_width=True):
+            l1["c7_enabled"] = st.toggle("Enable C7: Price Near 52-Week High", value=bool(l1.get("c7_enabled", True)))
+            l1["c7_max_pct_below_52w_high"] = st.number_input(
+                "Max % Below 52-Week High",
+                min_value=1.0,
+                max_value=80.0,
+                value=float(l1.get("c7_max_pct_below_52w_high", 25.0)),
+                step=5.0,
+            )
+    with l1_r2[2]:
+        p_c8 = f"✅ C8: RS Rating ≥ {l1['c8_min_rs_percentile']}" if l1["c8_enabled"] else "⚪ C8: RS Rating (OFF)"
+        with st.popover(p_c8, use_container_width=True):
+            l1["c8_enabled"] = st.toggle("Enable C8: Relative Strength Percentile", value=bool(l1.get("c8_enabled", True)))
+            l1["c8_min_rs_percentile"] = st.slider(
+                "Minimum RS Percentile (1-99)",
+                min_value=1,
+                max_value=99,
+                value=int(l1.get("c8_min_rs_percentile", 70)),
+            )
+    with l1_r2[3]:
+        p_c10 = f"✅ C10: Perf 1M > {y_1m_preview:+.1f}%" if l1["c10_enabled"] else "⚪ C10: Perf 1M (OFF)"
         with st.popover(p_c10, use_container_width=True):
             l1["c10_enabled"] = st.toggle("Enable C10: 1-Month Performance Filter", value=bool(l1.get("c10_enabled", True)))
             l1["c10_use_dynamic_sp500"] = st.toggle(
@@ -529,9 +614,8 @@ def main() -> None:
                     value=float(l1.get("c10_manual_min_pct", 7.0)),
                     step=1.0,
                 )
-
-    with r2_c5:
-        p_c11 = f"✅ Perf, 6M > {y_6m_preview:+.1f}%" if l1["c11_enabled"] else "⚪ Perf, 6M (OFF)"
+    with l1_r2[4]:
+        p_c11 = f"✅ C11: Perf 6M > {y_6m_preview:+.1f}%" if l1["c11_enabled"] else "⚪ C11: Perf 6M (OFF)"
         with st.popover(p_c11, use_container_width=True):
             l1["c11_enabled"] = st.toggle("Enable C11: 6-Month Performance Filter", value=bool(l1.get("c11_enabled", True)))
             l1["c11_use_dynamic_sp500"] = st.toggle(
@@ -545,41 +629,6 @@ def main() -> None:
                     value=float(l1.get("c11_manual_min_pct", 24.0)),
                     step=2.0,
                 )
-
-    with r2_c6:
-        p_c6 = f"✅ 52W Low +{l1['c6_min_pct_above_52w_low']:g}%" if l1["c6_enabled"] else "⚪ 52W Low (OFF)"
-        with st.popover(p_c6, use_container_width=True):
-            l1["c6_enabled"] = st.toggle("Enable C6: Price Cleared 52-Week Low", value=bool(l1.get("c6_enabled", True)))
-            l1["c6_min_pct_above_52w_low"] = st.number_input(
-                "Min % Above 52-Week Low",
-                min_value=0.0,
-                max_value=300.0,
-                value=float(l1.get("c6_min_pct_above_52w_low", 30.0)),
-                step=5.0,
-            )
-
-    with r2_c7:
-        p_c7 = f"✅ 52W High -{l1['c7_max_pct_below_52w_high']:g}%" if l1["c7_enabled"] else "⚪ 52W High (OFF)"
-        with st.popover(p_c7, use_container_width=True):
-            l1["c7_enabled"] = st.toggle("Enable C7: Price Near 52-Week High", value=bool(l1.get("c7_enabled", True)))
-            l1["c7_max_pct_below_52w_high"] = st.number_input(
-                "Max % Below 52-Week High",
-                min_value=1.0,
-                max_value=80.0,
-                value=float(l1.get("c7_max_pct_below_52w_high", 25.0)),
-                step=5.0,
-            )
-
-    with r2_c8:
-        p_c8 = f"✅ RS Rating ≥ {l1['c8_min_rs_percentile']}" if l1["c8_enabled"] else "⚪ RS Rating (OFF)"
-        with st.popover(p_c8, use_container_width=True):
-            l1["c8_enabled"] = st.toggle("Enable C8: Relative Strength Percentile", value=bool(l1.get("c8_enabled", True)))
-            l1["c8_min_rs_percentile"] = st.slider(
-                "Minimum RS Percentile (1-99)",
-                min_value=1,
-                max_value=99,
-                value=int(l1.get("c8_min_rs_percentile", 70)),
-            )
 
     # =========================================================================
     # EXECUTE INSTANT SCREENING (<1 SECOND)
@@ -704,8 +753,45 @@ def main() -> None:
             "tv_url",
         ]
 
+        # Clamp active_row_idx within current filtered watchlist bounds
+        if df_view.empty:
+            st.session_state["active_row_idx"] = 0
+        else:
+            st.session_state["active_row_idx"] = max(
+                0, min(int(st.session_state.get("active_row_idx", 0)), len(df_view) - 1)
+            )
+
+        # Sync if user clicked a row checkbox in the table on the previous render
+        table_state = st.session_state.get("watchlist_df_widget")
+        if table_state and isinstance(table_state, dict):
+            cur_sel = table_state.get("selection", {}).get("rows", [])
+            if cur_sel != st.session_state.get("last_table_sel", []):
+                st.session_state["last_table_sel"] = cur_sel
+                if cur_sel and 0 <= cur_sel[0] < len(df_view):
+                    st.session_state["active_row_idx"] = cur_sel[0]
+
+        active_idx = int(st.session_state.get("active_row_idx", 0))
+
+        # Add visual active pointer on Symbol column & highlight active row in cyan/blue
+        df_table = df_view[display_cols].copy()
+        if not df_table.empty:
+            df_table["ticker"] = [
+                f"▶ {t}" if i == active_idx else f"   {t}"
+                for i, t in enumerate(df_table["ticker"])
+            ]
+
+        def _highlight_active_row(row: pd.Series) -> list[str]:
+            if row.name == active_idx:
+                return [
+                    "background-color: rgba(56, 189, 248, 0.24); color: #ffffff; font-weight: 700;"
+                ] * len(row)
+            return [""] * len(row)
+
+        styled_table = df_table.style.apply(_highlight_active_row, axis=1)
+
         selection_event = st.dataframe(
-            df_view[display_cols],
+            styled_table,
+            key="watchlist_df_widget",
             use_container_width=True,
             height=235,
             hide_index=True,
@@ -743,27 +829,36 @@ def main() -> None:
         # BOTTOM SECTION: LIVE EMBEDDED TRADINGVIEW ADVANCED CHART WIDGET
         # =====================================================================
         if not df_view.empty:
-            selected_rows = (
-                selection_event.selection.rows
-                if selection_event and hasattr(selection_event, "selection")
-                else []
-            )
-            if selected_rows and selected_rows[0] < len(df_view):
-                inspected_row = df_view.iloc[selected_rows[0]]
-            else:
-                inspected_row = df_view.iloc[0]
-
+            inspected_row = df_view.iloc[active_idx]
             sel_ticker = str(inspected_row["ticker"])
             sel_name = str(inspected_row.get("company_name", ""))
             sel_exch = str(inspected_row.get("exchange", "NASDAQ"))
             tv_link = _build_tv_chart_url(sel_exch, sel_ticker, active_layout_id)
 
-            dr_hdr1, dr_hdr2 = st.columns([3.7, 1.3])
+            dr_hdr1, nav_prev_col, nav_next_col, dr_hdr2 = st.columns([2.9, 0.65, 0.85, 1.25])
             with dr_hdr1:
                 st.markdown(
-                    f"#### 📈 **{sel_exch}:{sel_ticker}** — {sel_name} "
+                    f"#### 📈 **[{active_idx + 1}/{len(df_view)}] {sel_exch}:{sel_ticker}** — {sel_name} "
                     f"(`{inspected_row['pass_summary']}` · `{inspected_row['diagnostic_badge']}`)"
                 )
+            with nav_prev_col:
+                if st.button(
+                    "◀ Prev (PgUp)",
+                    disabled=(active_idx <= 0),
+                    use_container_width=True,
+                    help="Shortcut: Press PageUp key",
+                ):
+                    st.session_state["active_row_idx"] = max(0, active_idx - 1)
+                    st.rerun()
+            with nav_next_col:
+                if st.button(
+                    "Next ▶ (PgDn/Space)",
+                    disabled=(active_idx >= len(df_view) - 1),
+                    use_container_width=True,
+                    help="Shortcut: Press PageDown or Spacebar",
+                ):
+                    st.session_state["active_row_idx"] = min(len(df_view) - 1, active_idx + 1)
+                    st.rerun()
             with dr_hdr2:
                 btn_label = (
                     f"📈 Open {sel_ticker} in BKCHO Chart ↗"
@@ -776,6 +871,7 @@ def main() -> None:
                     use_container_width=True,
                 )
 
+            _inject_keyboard_row_navigation()
             _render_tradingview_advanced_chart(sel_exch, sel_ticker, height=500)
 
 
