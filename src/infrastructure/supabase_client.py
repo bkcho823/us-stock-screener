@@ -1,7 +1,7 @@
 """
 Supabase Cloud Database Client (REST API via PostgREST)
 Uses standard `requests` + `SUPABASE_URL` and `SUPABASE_KEY` (from environment variables or Streamlit secrets).
-Automatically normalizes SUPABASE_URL even if the user pasted a dashboard URL or '/rest/v1' suffix.
+Automatically normalizes SUPABASE_URL even if a dashboard URL or '/rest/v1' suffix was pasted.
 """
 
 from __future__ import annotations
@@ -17,31 +17,22 @@ def _normalize_supabase_url(raw_url: str) -> str:
     """
     Ensures any Supabase URL format is converted to the clean base URL:
     `https://<project_ref>.supabase.co`
-    Handles cases where the user pasted:
-    - `https://<ref>.supabase.co/rest/v1/...`
-    - `https://supabase.com/dashboard/project/<ref>...`
-    - `<ref>.supabase.co`
-    - `<ref>` (just the 20-char project ID)
     """
     u = (raw_url or "").strip().strip('"').strip("'")
     if not u:
         return ""
 
-    # Case 1: User pasted dashboard URL: https://supabase.com/dashboard/project/<ref>...
     m_dash = re.search(r"supabase\.com/dashboard/project/([a-z0-9]+)", u, re.IGNORECASE)
     if m_dash:
         return f"https://{m_dash.group(1)}.supabase.co"
 
-    # Case 2: Standard <ref>.supabase.co anywhere in the string
     m_host = re.search(r"([a-z0-9\-]+)\.supabase\.co", u, re.IGNORECASE)
     if m_host:
         return f"https://{m_host.group(1)}.supabase.co"
 
-    # Case 3: Just a bare 20-character project reference ID
     if re.fullmatch(r"[a-z0-9]{15,30}", u):
         return f"https://{u}.supabase.co"
 
-    # Fallback: keep only scheme + netloc
     if not u.startswith("http"):
         u = "https://" + u
     parsed = urlparse(u)
@@ -89,7 +80,7 @@ def _headers(key: str, prefer: str = "") -> Dict[str, str]:
 
 
 def sb_upsert_kv(item_key: str, payload: Any) -> bool:
-    """Upserts a JSON object into `screener_kv_store` (used for EOD snapshot & S&P 500 benchmark)."""
+    """Upserts a JSON object into `screener_kv_store`."""
     url, key = get_supabase_credentials()
     if not url or not key:
         print(f"[Supabase] Skipping upsert for '{item_key}': SUPABASE_URL or SUPABASE_KEY is empty.")
@@ -143,7 +134,13 @@ def sb_list_presets() -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def sb_upsert_preset(name: str, description: str, layer0: Dict[str, Any], layer1: Dict[str, Any], saved_at_utc: str) -> bool:
+def sb_upsert_preset(
+    name: str,
+    description: str,
+    layer0: Dict[str, Any],
+    layer1: Dict[str, Any],
+    saved_at_utc: str,
+) -> bool:
     """Saves or updates a custom preset in `screener_presets`."""
     url, key = get_supabase_credentials()
     if not url or not key:

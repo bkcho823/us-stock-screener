@@ -1,7 +1,5 @@
 """
-Step 4: Preset Management & Run History Logger (Supabase Cloud DB Edition)
-- Stores and retrieves Custom User Presets and Screening Run History in Supabase Online DB.
-- Uses 0 MB of local disk storage.
+Repository for User Preferences: Custom Filter Presets, Run History Logs, and BKCHO TradingView Layout ID.
 """
 
 from __future__ import annotations
@@ -9,9 +7,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-from src.config import BUILTIN_PRESETS
-from src.supabase_client import (
+from src.config.builtin_presets import BUILTIN_PRESETS
+from src.config.settings import DEFAULT_TV_LAYOUT_ID
+from src.infrastructure.supabase_client import (
     is_supabase_configured,
+    sb_get_kv,
+    sb_upsert_kv,
     sb_list_presets,
     sb_upsert_preset,
     sb_delete_preset,
@@ -19,7 +20,7 @@ from src.supabase_client import (
     sb_list_run_logs,
 )
 
-# In-memory session fallback when running without Supabase credentials configured yet
+# In-memory session fallback when running without Supabase credentials configured
 _MEMORY_CUSTOM_PRESETS: Dict[str, Dict[str, Any]] = {}
 _MEMORY_RUN_HISTORY: List[Dict[str, Any]] = []
 
@@ -117,3 +118,27 @@ def log_screening_run(
         except Exception:
             pass
     return entry
+
+
+def load_tv_layout_id() -> str:
+    """Loads the user's saved TradingView 'BKCHO Chart' layout ID from Supabase."""
+    saved_layout = DEFAULT_TV_LAYOUT_ID
+    if not saved_layout and is_supabase_configured():
+        try:
+            val = sb_get_kv("tv_layout_id")
+            if isinstance(val, str):
+                saved_layout = val
+            elif isinstance(val, dict) and "layout_id" in val:
+                saved_layout = str(val["layout_id"])
+        except Exception:
+            pass
+    return saved_layout
+
+
+def save_tv_layout_id(layout_id: str) -> None:
+    """Saves the user's TradingView 'BKCHO Chart' layout ID permanently to Supabase."""
+    if is_supabase_configured():
+        try:
+            sb_upsert_kv("tv_layout_id", {"layout_id": layout_id})
+        except Exception:
+            pass

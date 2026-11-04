@@ -1,19 +1,19 @@
 """
-Step 3: Layer 0 & Layer 1 Screening & Math Engine (Chief UI Designer Enhanced Edition)
-- Applies all 12 adjustable Layer 0 Pre-Filter controls
-- Dynamically computes the 1-99 Relative Strength (RS) Percentile across the qualifying Layer 0 candidate pool
-- Evaluates all 11 Layer 1 Trend & Momentum conditions
-- Produces Plain-English Diagnostic Badges ('✅ All 11 Passed' vs '⚠️ Missed: C7 (52W High)')
-- Computes per-condition bottleneck pass counts & percentages across the Layer 0 pool
+Layer 1 — Extended 11-Condition Trend & Momentum Engine.
+- Dynamically computes the 1-99 Relative Strength (RS) Percentile across the qualifying Layer 0 pool
+- Evaluates Mark Minervini's 8 Trend Template rules (C1–C8), short-term swing alignment (C9: SMA10 >= SMA20),
+  and dynamic S&P 500 outperformance rules (C10: 1M Perf, C11: 6M Perf)
+- Generates plain-English diagnostic badges and per-condition bottleneck pass rates.
 """
 
 from __future__ import annotations
 
 from typing import Dict, Any, Tuple, List
+
 import numpy as np
 import pandas as pd
 
-from src.config import compute_dynamic_sp500_threshold, CONDITION_METADATA
+from src.config.settings import compute_dynamic_sp500_threshold, CONDITION_METADATA
 
 SHORT_DIAGNOSTIC_LABELS: Dict[str, str] = {
     "c1": "C1(P>150/200)",
@@ -35,63 +35,6 @@ def _pick_nearest_lag_column(lookback_days: int) -> str:
     available = [5, 10, 15, 20, 30, 40, 60]
     nearest = min(available, key=lambda x: abs(x - int(lookback_days)))
     return f"sma_200_lag_{nearest}"
-
-
-def apply_layer0_filter(df: pd.DataFrame, layer0_cfg: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Applies the 12 adjustable Layer 0 Candidate Universe Pre-Filter criteria.
-    """
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    mask = pd.Series(True, index=df.index)
-
-    # 1. Min Market Cap ($ Billions)
-    min_mc = float(layer0_cfg.get("min_market_cap_b", 3.0))
-    if min_mc > 0:
-        mask &= df["market_cap_b"].fillna(0.0) >= min_mc
-
-    # 2. Max Market Cap ($ Billions, 0 = no limit)
-    max_mc = float(layer0_cfg.get("max_market_cap_b", 0.0))
-    if max_mc > 0:
-        mask &= df["market_cap_b"].fillna(0.0) <= max_mc
-
-    # 3. Min Share Price ($)
-    min_price = float(layer0_cfg.get("min_price", 10.0))
-    if min_price > 0:
-        mask &= df["close"].fillna(0.0) >= min_price
-
-    # 4-8. Multi-Horizon Share Volume Checks (1D, 10D, 30D, 60D, 90D)
-    for col, cfg_key in [
-        ("vol_1d", "min_vol_1d"),
-        ("vol_10d", "min_vol_10d"),
-        ("vol_30d", "min_vol_30d"),
-        ("vol_60d", "min_vol_60d"),
-        ("vol_90d", "min_vol_90d"),
-    ]:
-        min_vol = float(layer0_cfg.get(cfg_key, 500_000))
-        if min_vol > 0 and col in df.columns:
-            mask &= df[col].fillna(0.0) >= min_vol
-
-    # 9. Min Dollar Volume (Price x Vol in $ Millions)
-    min_dvol = float(layer0_cfg.get("min_dollar_vol_m", 50.0))
-    if min_dvol > 0:
-        mask &= df["dollar_vol_m"].fillna(0.0) >= min_dvol
-
-    # 10. Exchanges (NYSE, NASDAQ, AMEX)
-    exchanges = layer0_cfg.get("exchanges", ["NYSE", "NASDAQ", "AMEX"])
-    if exchanges:
-        mask &= df["exchange"].isin(exchanges)
-
-    # 11. Exclude ETFs / Funds
-    if bool(layer0_cfg.get("exclude_etfs", True)) and "is_etf_or_fund" in df.columns:
-        mask &= ~df["is_etf_or_fund"].fillna(False)
-
-    # 12. Include / Exclude Foreign ADRs
-    if not bool(layer0_cfg.get("include_adrs", True)) and "is_adr" in df.columns:
-        mask &= ~df["is_adr"].fillna(False)
-
-    return df[mask].copy().reset_index(drop=True)
 
 
 def evaluate_layer1_conditions(
@@ -126,7 +69,6 @@ def evaluate_layer1_conditions(
     else:
         df["rs_percentile"] = 99
 
-    # Individual condition evaluation
     # C1: Close > SMA150 and Close > SMA200
     df["c1_pass"] = (df["close"] > df["sma_150"]) & (df["close"] > df["sma_200"])
 
@@ -152,7 +94,7 @@ def evaluate_layer1_conditions(
     df["pct_above_52w_low"] = (((df["close"] / df["low_52w"]) - 1.0) * 100.0).round(2)
     df["c6_pass"] = df["pct_above_52w_low"] >= min_above_low_pct
 
-    # C7: Close >= 52W High * (1 - Y%)  (i.e. within Y% below 52W high)
+    # C7: Close >= 52W High * (1 - Y%)
     max_below_high_pct = float(layer1_cfg.get("c7_max_pct_below_52w_high", 25.0))
     df["pct_below_52w_high"] = (
         ((df["high_52w"] - df["close"]) / df["high_52w"]).clip(lower=0.0) * 100.0
@@ -189,7 +131,7 @@ def evaluate_layer1_conditions(
     )
     df["c11_pass"] = df["perf_6m"].fillna(-999.0) > y_6m_thresh
 
-    # Count how many of the ENABLED conditions each stock passes & build bottlenecks
+    # Count enabled conditions & build bottleneck detector statistics
     active_ids: List[str] = []
     bottlenecks: List[Dict[str, Any]] = []
     total_l0 = len(df)
@@ -224,7 +166,6 @@ def evaluate_layer1_conditions(
 
     df["pass_summary"] = df["passed_count"].astype(str) + " / " + df["total_active"].astype(str)
 
-    # Plain-English Diagnostic Badge for each row ('✅ All 11 Passed' vs '⚠️ Missed: C7(52W High)')
     def _build_diag(row: pd.Series) -> str:
         if not active_ids:
             return "⚪ No Active Rules"
@@ -239,7 +180,6 @@ def evaluate_layer1_conditions(
 
     df["diagnostic_badge"] = df.apply(_build_diag, axis=1)
 
-    # Sort by Passed Count (desc), then RS Percentile (desc), then Market Cap (desc)
     df = df.sort_values(
         by=["passed_count", "rs_percentile", "market_cap_b"],
         ascending=[False, False, False],
@@ -269,7 +209,7 @@ def build_stock_condition_breakdown(
     summary_meta: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     """
-    Produces a human-readable, transparent 11-condition pass/fail table for any single stock.
+    Produces a human-readable, transparent 11-condition pass/fail breakdown for any single stock.
     """
     lookback_n = int(layer1_cfg.get("c3_lookback_days", 20))
     min_above_low = float(layer1_cfg.get("c6_min_pct_above_52w_low", 30.0))
@@ -278,7 +218,7 @@ def build_stock_condition_breakdown(
     y_1m = float(summary_meta.get("y_1m_threshold_pct", 0.0))
     y_6m = float(summary_meta.get("y_6m_threshold_pct", 0.0))
 
-    details = [
+    return [
         {
             "Group": "Trend Stack",
             "Condition": "C1: Price > SMA150 & SMA200",
@@ -368,4 +308,3 @@ def build_stock_condition_breakdown(
             "Required Threshold": f"> {y_6m:+.2f}%",
         },
     ]
-    return details

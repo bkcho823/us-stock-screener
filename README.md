@@ -1,69 +1,75 @@
-# US Stock Momentum Screener (Layer 0 + Layer 1)
+# US Stock Momentum Screener (Modular 4-Tier Architecture)
 
-An End-of-Day (EOD) US equity screening web application implementing **Layer 0 (Candidate Universe Pre-Filter)** and **Layer 1 (Mark Minervini's 8-Condition Trend Template + Short-Term Swing Alignment + Dynamic S&P 500 1M/6M Outperformance)**.
-
----
-
-## Features Built
-
-### 1. Layer 0: Candidate Universe Pre-Filter (12 Adjustable Controls)
-All figures can be modified on the fly with sub-second (`<1s`) recalculation:
-- **Min / Max Market Cap (\$B):** Default `>= $3.0B` (adjustable anytime e.g. to `$2.0B`).
-- **Min Share Price (\$):** Default `>= $10.0`.
-- **Multi-Horizon Volume Filters:** Independent inputs for **1D Volume**, **10D Avg Vol**, **30D Avg Vol**, **60D Avg Vol**, and **90D Avg Vol** (all default `> 500,000` shares).
-- **Min Dollar Volume (`Price × Vol`):** Default `> $50M USD`.
-- **US Exchanges & Security Types:** `NYSE`, `NASDAQ`, `AMEX`, Exclude ETFs/Funds toggle, and Include ADRs toggle.
-
-### 2. Layer 1: Extended 11-Condition Trend & Momentum Template
-Every condition has an independent **ON/OFF toggle** and adjustable thresholds:
-- **C1:** $\text{Close} > \text{SMA}_{150}$ and $\text{Close} > \text{SMA}_{200}$
-- **C2:** $\text{SMA}_{150} > \text{SMA}_{200}$
-- **C3:** $\text{SMA}_{200}$ trending upward over $N$ lookback trading days (default `20` days $\approx 1$ month)
-- **C4:** $\text{SMA}_{50} > \text{SMA}_{150} > \text{SMA}_{200}$
-- **C5:** $\text{Close} > \text{SMA}_{50}$
-- **C6:** $\text{Close} \ge \text{52W Low} \times (1 + X\%)$ (default `30%` above 52W low)
-- **C7:** $\text{Close} \ge \text{52W High} \times (1 - Y\%)$ (default within `25%` of 52W high)
-- **C8:** Pool-wide **Relative Strength (RS) Percentile** $\ge P$ (default `70` out of 1–99, weighted $40\% \times 3\text{M} + 20\% \times 6\text{M} + 20\% \times 9\text{M} + 20\% \times 12\text{M}$)
-- **C9:** Short-term swing alignment: $\text{SMA}_{10} \ge \text{SMA}_{20}$
-- **C10:** **1M Performance > Dynamic S&P 500 Target** (`2.0x` S&P 500 1M return when S&P $\ge 0\%$; `0.5x` when S&P $< 0\%$, plus manual override)
-- **C11:** **6M Performance > Dynamic S&P 500 Target** (`2.0x` S&P 500 6M return when S&P $\ge 0\%$; `0.5x` when S&P $< 0\%$, plus manual override)
+An End-of-Day (EOD) US equity screening web application implementing **Layer 0 (Candidate Universe Pre-Filter)** and **Layer 1 (Mark Minervini's 8-Condition Trend Template + Short-Term Swing Alignment + Dynamic S&P 500 1M/6M Outperformance)**, structured on a clean **4-Tier Modular Architecture** ready for **Layers 2–5 (Sector Strength, VCP Tightness, Entry Pivot Signals, and Position Sizing)**.
 
 ---
 
-## Step-by-Step Guide to Run Locally or Deploy Free to the Cloud
+## Modular Software Architecture
 
-### Option 1: Run Locally on Your PC
-1. Open a terminal in `c:\BKCHO\Job\USStockVCP` and install the dependencies:
+```text
+USStockVCP/
+├── app.py                              # Thin ~55-line orchestrator (wires UI + Screening Pipeline)
+├── requirements.txt
+├── supabase_schema.sql
+├── .github/workflows/
+│   └── daily_eod_update.yml            # Weekday EOD cron job (`python -m src.providers.eod_sync_service`)
+│
+├── src/
+│   ├── config/                         # 1. CONFIGURATION & BUILT-IN PRESETS
+│   │   ├── settings.py                 # Threshold defaults, URL helpers, condition metadata
+│   │   └── builtin_presets.py          # Built-in strategy presets (Bryan's Full, TV, BRD)
+│   │
+│   ├── infrastructure/                 # 2. CLOUD DATABASE & PERSISTENCE ADAPTERS (100% Online Supabase)
+│   │   ├── supabase_client.py          # PostgREST HTTP client + URL normalizer
+│   │   ├── market_repo.py              # Load/Save EOD stock snapshot & S&P 500 benchmark
+│   │   └── user_prefs_repo.py          # Load/Save Custom Presets, Run Logs, & BKCHO Layout ID
+│   │
+│   ├── providers/                      # 3. EXTERNAL MARKET DATA PROVIDERS
+│   │   ├── tradingview_scanner.py      # Fetches US stock metadata & volumes from TradingView
+│   │   ├── yahoo_finance.py            # Fetches S&P 500 benchmark & 252-day SMA/RS history
+│   │   └── eod_sync_service.py         # End-of-day batch pipeline combining providers -> Supabase
+│   │
+│   ├── layers/                         # 4. PLUGGABLE MULTI-LAYER SCREENING ENGINE
+│   │   ├── base.py                     # ScreeningPipelineResult & ScreeningLayer contract
+│   │   ├── layer0_universe.py          # Layer 0: Universe Pre-Filter (Mkt Cap, Price, Vol, Exch)
+│   │   ├── layer1_trend.py             # Layer 1: 11 Trend/Momentum Rules + Bottleneck stats
+│   │   ├── pipeline.py                 # Sequential runner: L0 -> L1 (-> future L2/L3/L4/L5)
+│   │   └── future/                     # Ready-to-implement extension modules:
+│   │       ├── layer2_sector.py        # Layer 2: Sector & Industry Group Strength
+│   │       ├── layer3_vcp.py           # Layer 3: VCP Tightness & Contraction Detection
+│   │       ├── layer4_entry.py         # Layer 4: M.E.T.A. Pivot Breakout Trigger
+│   │       └── layer5_risk.py          # Layer 5: Stop-Loss & Position Sizing Calculator
+│   │
+│   └── ui/                             # 5. PRESENTATION LAYER (MODULAR STREAMLIT COMPONENTS)
+│       ├── theme.py                    # Custom CSS styles (hidden sidebar, top pill styling)
+│       ├── state_manager.py            # Session state init, active row index, preset switching
+│       ├── top_header.py               # Title, DB badge, Preset picker, BKCHO URL, Refresh
+│       ├── pills/                      # Modular Top Filter Pill Bars:
+│       │   ├── layer0_pills.py         # 11 Layer 0 Universe pills (2 wide rows)
+│       │   └── layer1_pills.py         # 11 Layer 1 Trend/Momentum pills (2 wide rows)
+│       ├── bottleneck_strip.py         # Color-coded condition pass-rate chip bar
+│       ├── watchlist_grid.py           # Toolbar, active row highlight table, CSV export
+│       └── tradingview_cockpit.py      # Prev/Next bar, PgUp/PgDn/Space JS, & live TV widget
+│
+└── tests/                              # 6. AUTOMATED UNIT TESTS PER LAYER
+    ├── test_layer0.py
+    ├── test_layer1.py
+    └── test_pipeline.py
+```
+
+---
+
+## Local Verification & Launch
+
+1. Install dependencies:
    ```powershell
    pip install -r requirements.txt
    ```
-2. Run the unit tests to verify the math engine:
+2. Run the automated unit test suite:
    ```powershell
-   python -m tests.test_screener
+   python -m unittest discover -s tests -v
    ```
-3. Launch the interactive web dashboard:
+3. Launch the Streamlit web app:
    ```powershell
    streamlit run app.py
    ```
-
----
-
-### Option 2: Deploy 100% Free to Streamlit Community Cloud + GitHub Actions
-1. **Create a GitHub Repository:**
-   - Go to [github.com/new](https://github.com/new) and create a repository (e.g., `us-stock-vcp-screener`).
-   - Push this folder (`c:\BKCHO\Job\USStockVCP`) to your GitHub repository:
-     ```powershell
-     git init
-     git add .
-     git commit -m "Initial commit: US Stock Momentum Screener Layer 0 + Layer 1"
-     git branch -M main
-     git remote add origin https://github.com/<YOUR_GITHUB_USERNAME>/us-stock-vcp-screener.git
-     git push -u origin main
-     ```
-2. **Automatic Daily EOD Data Updates (GitHub Actions):**
-   - The workflow in [`.github/workflows/daily_eod_update.yml`](file:///c:/BKCHO/Job/USStockVCP/.github/workflows/daily_eod_update.yml) will automatically run **Monday–Friday at 21:30 UTC (after US market close)**, fetch the latest TradingView + Yahoo Finance EOD data and S&P 500 benchmark, and save the updated snapshot to `data/daily_snapshot.parquet`.
-   - You can also trigger it manually anytime from your GitHub repo's **Actions** tab → **Daily EOD US Stock Screener Data Update** → **Run workflow**.
-3. **Connect to Streamlit Community Cloud (Free 24/7 Web URL):**
-   - Go to [share.streamlit.io](https://share.streamlit.io) and sign in with your GitHub account.
-   - Click **Create app** → select your `us-stock-vcp-screener` repository, branch `main`, and main file path `app.py`.
-   - Click **Deploy!** Within ~2 minutes, you will have a permanent `https://...streamlit.app` web link accessible from your computer or phone.

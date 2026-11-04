@@ -30,4 +30,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          python -m src.data_pipeline
+          python -m src.providers.eod_sync_service
