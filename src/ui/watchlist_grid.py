@@ -38,7 +38,7 @@ def render_watchlist_grid(
     l2_meta = summary_meta.get("l2_meta", {})
     l2_qual_cnt = l2_meta.get("l2_qualified_count", qual_cnt)
 
-    tb1, tb2, tb3, tb4 = st.columns([3.0, 1.4, 1.3, 0.8])
+    tb1, tb2, tb3, tb4, tb5 = st.columns([2.6, 1.4, 1.2, 1.1, 0.7])
     with tb1:
         view_mode = st.radio(
             "Watchlist View Mode",
@@ -52,6 +52,20 @@ def render_watchlist_grid(
             label_visibility="collapsed",
         )
     with tb2:
+        sort_mode = st.selectbox(
+            "Sort Order",
+            options=[
+                "🥇 Overall Strongest (L2 Score)",
+                "⚡ Pure RS Rating (Stock RS)",
+                "🏔️ Near 52W High (% of High)",
+                "🚀 1M Momentum (Perf 1M)",
+                "🏛️ Market Cap (Mega to Small)",
+            ],
+            index=0,
+            label_visibility="collapsed",
+            help="Determines which stock ranks at the top of the list and loads in the chart first.",
+        )
+    with tb3:
         all_sectors = sorted(df_scored["sector"].dropna().unique().tolist())
         selected_sectors = st.multiselect(
             "Filter by Sector",
@@ -59,7 +73,7 @@ def render_watchlist_grid(
             placeholder="All Sectors...",
             label_visibility="collapsed",
         )
-    with tb3:
+    with tb4:
         search_query = st.text_input(
             "Search Ticker / Company",
             placeholder="🔍 Symbol / Company...",
@@ -85,6 +99,25 @@ def render_watchlist_grid(
             | df_view["company_name"].fillna("").str.lower().str.contains(q)
         ]
 
+    # Explicit multi-tier sorting to guarantee the overall strongest stock is placed at Row #0
+    if not df_view.empty:
+        if sort_mode.startswith("🥇 Overall Strongest"):
+            # Primary: L2 Composite Score -> Secondary: Stock RS -> Tertiary: % of 52W High -> Quaternary: Perf 1M
+            sort_cols = [c for c in ["composite_score", "rs_percentile", "pct_of_52w_high", "perf_1m"] if c in df_view.columns]
+            df_view = df_view.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+        elif sort_mode.startswith("⚡ Pure RS Rating"):
+            sort_cols = [c for c in ["rs_percentile", "composite_score", "pct_of_52w_high", "perf_1m"] if c in df_view.columns]
+            df_view = df_view.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+        elif sort_mode.startswith("🏔️ Near 52W High"):
+            sort_cols = [c for c in ["pct_of_52w_high", "composite_score", "rs_percentile", "perf_1m"] if c in df_view.columns]
+            df_view = df_view.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+        elif sort_mode.startswith("🚀 1M Momentum"):
+            sort_cols = [c for c in ["perf_1m", "composite_score", "rs_percentile", "pct_of_52w_high"] if c in df_view.columns]
+            df_view = df_view.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+        elif sort_mode.startswith("🏛️ Market Cap"):
+            sort_cols = [c for c in ["market_cap_b", "composite_score", "rs_percentile"] if c in df_view.columns]
+            df_view = df_view.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+
     df_view = df_view.reset_index(drop=True)
     active_layout_id = st.session_state.get("tv_layout_id", "")
     df_view["tv_url"] = df_view.apply(
@@ -92,7 +125,7 @@ def render_watchlist_grid(
         axis=1,
     )
 
-    with tb4:
+    with tb5:
         csv_bytes = df_view.to_csv(index=False).encode("utf-8")
         st.download_button(
             label=f"⬇️ CSV ({len(df_view)})",
