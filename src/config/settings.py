@@ -78,6 +78,25 @@ def get_default_layer1_config() -> Dict[str, Any]:
     }
 
 
+def get_default_layer2_config() -> Dict[str, Any]:
+    """
+    Default Layer 2 Momentum & Industry Leadership Template (Expert Panel Consensus):
+    - Industry Group Gate: Keep stocks in Top X% of Industry Groups (default: Top 40%, group RS >= 60)
+    - Lone Wolf Leader Override: If individual RS >= 90, exempt from industry gate
+    - Composite Score Weights: 50% Stock RS + 35% Industry Group RS + 15% In-Group Leadership Rank
+    """
+    return {
+        "l2_enabled": True,
+        "group_gate_enabled": True,
+        "top_group_pct": 40.0,            # Top 40% (min group percentile >= 60)
+        "lone_wolf_enabled": True,
+        "lone_wolf_min_rs": 90,           # RS >= 90 exempt from group gate
+        "weight_stock_rs": 0.50,          # 50%
+        "weight_group_rs": 0.35,          # 35%
+        "weight_lead_rank": 0.15,         # 15%
+    }
+
+
 def compute_dynamic_sp500_threshold(
     sp500_return_pct: float,
     use_dynamic: bool,

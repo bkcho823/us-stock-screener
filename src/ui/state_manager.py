@@ -14,6 +14,7 @@ from src.config import (
     BUILTIN_PRESETS,
     get_default_layer0_config,
     get_default_layer1_config,
+    get_default_layer2_config,
 )
 from src.infrastructure.market_repo import load_cached_market_data
 from src.infrastructure.user_prefs_repo import load_tv_layout_id
@@ -26,6 +27,8 @@ def init_session_state() -> None:
         st.session_state["layer0_cfg"] = get_default_layer0_config()
     if "layer1_cfg" not in st.session_state:
         st.session_state["layer1_cfg"] = get_default_layer1_config()
+    if "layer2_cfg" not in st.session_state:
+        st.session_state["layer2_cfg"] = get_default_layer2_config()
     if "active_preset_name" not in st.session_state:
         st.session_state["active_preset_name"] = list(BUILTIN_PRESETS.keys())[0]
     if "active_row_idx" not in st.session_state:
@@ -42,8 +45,10 @@ def apply_preset_to_state(preset_name: str, presets: Dict[str, Dict[str, Any]]) 
         p = presets[preset_name]
         l0 = {**get_default_layer0_config(), **p.get("layer0", {})}
         l1 = {**get_default_layer1_config(), **p.get("layer1", {})}
+        l2 = {**get_default_layer2_config(), **p.get("layer2", {})}
         st.session_state["layer0_cfg"] = l0
         st.session_state["layer1_cfg"] = l1
+        st.session_state["layer2_cfg"] = l2
         st.session_state["active_preset_name"] = preset_name
 
 

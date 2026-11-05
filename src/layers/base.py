@@ -16,6 +16,7 @@ class ScreeningPipelineResult:
     df_l0: pd.DataFrame
     df_scored: pd.DataFrame
     summary_meta: Dict[str, Any] = field(default_factory=dict)
+    l2_meta: Dict[str, Any] = field(default_factory=dict)
     elapsed_ms: float = 0.0
 
 

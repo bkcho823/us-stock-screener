@@ -1,6 +1,7 @@
 """
-Watchlist Grid Component — Renders View Mode Radio Pills (Qualified / Near-Miss / Broad / Full Layer 0),
-Sector Multiselect, Symbol Search, CSV Export, and the 235px Interactive DataFrame with Active Row Highlight.
+Watchlist Grid Component — Renders View Mode Radio Pills (L2 Leader-Tier / All Qualified / Near-Miss / Full Pool),
+Sector Multiselect, Symbol Search, CSV Export, and the 235px Interactive DataFrame with Active Row Highlight,
+Composite Score, and Industry Leaderboard Rank.
 """
 
 from __future__ import annotations
@@ -34,15 +35,18 @@ def render_watchlist_grid(
     near_cnt = summary_meta["near_miss_count"]
     active_cnt = summary_meta["active_condition_count"]
 
-    tb1, tb2, tb3, tb4 = st.columns([2.6, 1.5, 1.3, 0.8])
+    l2_meta = summary_meta.get("l2_meta", {})
+    l2_qual_cnt = l2_meta.get("l2_qualified_count", qual_cnt)
+
+    tb1, tb2, tb3, tb4 = st.columns([3.0, 1.4, 1.3, 0.8])
     with tb1:
         view_mode = st.radio(
             "Watchlist View Mode",
             options=[
-                f"🏆 Qualified ({active_cnt}/{active_cnt}) [{qual_cnt}]",
-                f"🎯 Near-Miss ({max(0, active_cnt - 1)}/{active_cnt}) [{near_cnt}]",
-                f"👀 Broad ({max(0, active_cnt - 2)}+) ",
-                f"🌐 Full Layer 0 [{l0_cnt}]",
+                f"🎯 L2 Leaders [{l2_qual_cnt}]",
+                f"🏆 All L1 Qualified [{qual_cnt}]",
+                f"🎯 Near-Miss [{near_cnt}]",
+                f"🌐 Full Pool [{l0_cnt}]",
             ],
             horizontal=True,
             label_visibility="collapsed",
@@ -58,16 +62,16 @@ def render_watchlist_grid(
     with tb3:
         search_query = st.text_input(
             "Search Ticker / Company",
-            placeholder="🔍 Symbol / Company (e.g. LLY, NVDA)...",
+            placeholder="🔍 Symbol / Company...",
             label_visibility="collapsed",
         )
 
-    if view_mode.startswith("🏆"):
+    if view_mode.startswith("🎯 L2 Leaders"):
+        df_view = df_scored[df_scored["qualified_all"] & df_scored.get("l2_qualified", True)].copy()
+    elif view_mode.startswith("🏆 All L1 Qualified"):
         df_view = df_scored[df_scored["qualified_all"]].copy()
-    elif view_mode.startswith("🎯"):
+    elif view_mode.startswith("🎯 Near-Miss"):
         df_view = df_scored[df_scored["passed_count"] == max(0, active_cnt - 1)].copy()
-    elif view_mode.startswith("👀"):
-        df_view = df_scored[df_scored["passed_count"] >= max(0, active_cnt - 2)].copy()
     else:
         df_view = df_scored.copy()
 
@@ -98,22 +102,25 @@ def render_watchlist_grid(
             use_container_width=True,
         )
 
+    # Columns configuration including Layer 2 Composite Score & Industry Rank
     display_cols = [
         "ticker",
-        "company_name",
+        "composite_score",
+        "rs_percentile",
+        "group_rs_percentile",
+        "industry_rank_str",
         "close",
         "vol_1d",
         "market_cap_b",
-        "rs_percentile",
         "perf_1m",
         "perf_6m",
         "pct_of_52w_high",
-        "dollar_vol_m",
-        "sector",
-        "pass_summary",
+        "l2_badge",
         "diagnostic_badge",
         "tv_url",
     ]
+    # Filter only columns present in df_view
+    display_cols = [c for c in display_cols if c in df_view.columns]
 
     # Clamp active_row_idx within current filtered watchlist bounds
     if df_view.empty:
@@ -136,7 +143,7 @@ def render_watchlist_grid(
 
     # Add visual active pointer on Symbol column & highlight active row in cyan/blue
     df_table = df_view[display_cols].copy()
-    if not df_table.empty:
+    if not df_table.empty and "ticker" in df_table.columns:
         df_table["ticker"] = [
             f"▶ {t}" if i == active_idx else f"   {t}"
             for i, t in enumerate(df_table["ticker"])
@@ -161,28 +168,18 @@ def render_watchlist_grid(
         selection_mode="single-row",
         column_config={
             "ticker": st.column_config.TextColumn(f"Symbol ({len(df_view)})", width="small"),
-            "company_name": st.column_config.TextColumn("Company", width="medium"),
+            "composite_score": st.column_config.NumberColumn("L2 Score", format="%.1f", width="small"),
+            "rs_percentile": st.column_config.ProgressColumn("Stock RS", format="%d", min_value=1, max_value=99),
+            "group_rs_percentile": st.column_config.NumberColumn("Ind RS", format="%d", width="small"),
+            "industry_rank_str": st.column_config.TextColumn("Industry & Rank", width="medium"),
             "close": st.column_config.NumberColumn("Price", format="$%.2f"),
             "vol_1d": st.column_config.NumberColumn("Vol", format="%d"),
             "market_cap_b": st.column_config.NumberColumn("Mkt cap", format="$%.2fB"),
-            "rs_percentile": st.column_config.ProgressColumn(
-                "RS Rank",
-                format="%d",
-                min_value=1,
-                max_value=99,
-            ),
             "perf_1m": st.column_config.NumberColumn("Perf 1M", format="%+.2f%%"),
             "perf_6m": st.column_config.NumberColumn("Perf 6M", format="%+.2f%%"),
-            "pct_of_52w_high": st.column_config.ProgressColumn(
-                "% of 52W High",
-                format="%.1f%%",
-                min_value=0,
-                max_value=100,
-            ),
-            "dollar_vol_m": st.column_config.NumberColumn("Price×Vol", format="$%.0fM"),
-            "sector": st.column_config.TextColumn("Sector", width="medium"),
-            "pass_summary": st.column_config.TextColumn("Score", width="small"),
-            "diagnostic_badge": st.column_config.TextColumn("Status / Missed Rules", width="medium"),
+            "pct_of_52w_high": st.column_config.ProgressColumn("% 52W High", format="%.1f%%", min_value=0, max_value=100),
+            "l2_badge": st.column_config.TextColumn("L2 Industry Status", width="medium"),
+            "diagnostic_badge": st.column_config.TextColumn("L1 Trend Rules", width="medium"),
             "tv_url": st.column_config.LinkColumn("BKCHO Chart", display_text="Open in TV ↗"),
         },
     )
