@@ -19,6 +19,7 @@ class ScreeningPipelineResult:
     l2_meta: Dict[str, Any] = field(default_factory=dict)
     l3_meta: Dict[str, Any] = field(default_factory=dict)
     l4_meta: Dict[str, Any] = field(default_factory=dict)
+    l5_meta: Dict[str, Any] = field(default_factory=dict)
     elapsed_ms: float = 0.0
 
 

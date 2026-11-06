@@ -17,13 +17,14 @@ class TestModularArchitectureImports(unittest.TestCase):
         import src.layers
         import src.layers.future.layer2_sector
         import src.layers.future.layer3_vcp
-        import src.layers.future.layer5_risk
         import src.ui
 
         self.assertTrue(callable(app.main))
         self.assertTrue(callable(src.providers.eod_sync_service.refresh_daily_market_data))
         self.assertTrue(callable(src.layers.run_screening_pipeline))
         self.assertTrue(callable(src.layers.layer4_entry.evaluate_layer4_entry_signals))
+        self.assertTrue(callable(src.layers.layer5_risk.evaluate_layer5_position_sizing))
+        self.assertTrue(callable(src.ui.render_layer5_pills))
         self.assertTrue(callable(src.ui.render_layer4_pills))
         self.assertTrue(callable(src.ui.render_layer3_pills))
         self.assertTrue(callable(src.ui.render_layer2_pills))

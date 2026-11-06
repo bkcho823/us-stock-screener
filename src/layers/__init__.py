@@ -15,6 +15,7 @@ from src.layers.layer2_sector import (
 )
 from src.layers.layer3_vcp import evaluate_layer3_vcp_and_structure
 from src.layers.layer4_entry import evaluate_layer4_entry_signals
+from src.layers.layer5_risk import evaluate_layer5_position_sizing
 from src.layers.pipeline import run_screening_pipeline
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     "evaluate_layer2_momentum_and_sector",
     "evaluate_layer3_vcp_and_structure",
     "evaluate_layer4_entry_signals",
+    "evaluate_layer5_position_sizing",
     "run_screening_pipeline",
 ]

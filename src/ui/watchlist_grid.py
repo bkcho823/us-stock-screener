@@ -296,7 +296,7 @@ def render_watchlist_grid(
     )
 
     # -------------------------------------------------------------------------
-    # 5. Render Table 2: Dedicated Layer 3 & 4 Actionable Breakout Setups Table
+    # 5. Render Table 2: Dedicated Layer 3–5 Actionable Breakout Setups & Position Sizing Table
     # -------------------------------------------------------------------------
     st.markdown("---")
     l4_meta = summary_meta.get("l4_meta", {})
@@ -307,21 +307,21 @@ def render_watchlist_grid(
     l3_hdr1, l3_hdr2 = st.columns([3.8, 1.2])
     with l3_hdr1:
         st.markdown(
-            f"#### ⚡ **Layer 3 & 4: VCP Breakout & Actionable Entry Setups** &nbsp; "
+            f"#### ⚡ **Layer 3–5: Actionable VCP Setups & Position Sizing** &nbsp; "
             f"<span style='background:rgba(56,189,248,0.18); color:#38bdf8; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.88rem;'>"
             f"{len(df_l3)} Setups ({trig_cnt} 🚀 Triggered · {bz_cnt} ⚡ Buy Zone · {deck_cnt} ⏳ On Deck)</span>",
             unsafe_allow_html=True,
         )
         st.caption(
-            "Stocks meeting strict VCP Contraction & 21/50 EMA Structure with real-time Pivot Resistance ($), Buy Zone Proximity (%), and Volume Surge."
+            "Stocks meeting strict VCP Contraction & EMA Structure with real-time Pivot Resistance, Volume Surge, Stop-Loss (1R), and 1% Risk Position Sizes."
         )
     with l3_hdr2:
         if not df_l3.empty:
             csv_l3_bytes = df_l3.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label=f"⬇️ CSV L3/L4 Setups ({len(df_l3)})",
+                label=f"⬇️ CSV Setups & Risk ({len(df_l3)})",
                 data=csv_l3_bytes,
-                file_name=f"l4_actionable_setups_{sp500_bm.get('as_of_date', 'eod')}.csv",
+                file_name=f"actionable_setups_and_sizing_{sp500_bm.get('as_of_date', 'eod')}.csv",
                 mime="text/csv",
                 use_container_width=True,
                 key="dl_l3_setups_csv",
@@ -329,13 +329,19 @@ def render_watchlist_grid(
 
     if df_l3.empty:
         st.info(
-            "ℹ️ No stocks currently fulfill strict Layer 3/4 VCP breakout criteria with your active thresholds. "
-            "Use the Layer 3/4 filter pills in the top bar above to relax contraction, volume dry-up, or volume surge thresholds."
+            "ℹ️ No stocks currently fulfill strict Layer 3–5 breakout and risk criteria with your active thresholds. "
+            "Use the filter pills in the top bar above to relax contraction, volume dry-up, or stop loss thresholds."
         )
     else:
         t2_cols = [
             "ticker",
             "action_status_badge",
+            "stop_loss_price",
+            "risk_pct",
+            "target_price",
+            "recommended_shares",
+            "position_value",
+            "portfolio_alloc_pct",
             "pivot_price",
             "dist_to_pivot_pct",
             "vol_expansion_pct",
@@ -365,13 +371,19 @@ def render_watchlist_grid(
             styler_t2,
             key="l3_df_widget",
             use_container_width=True,
-            height=210,
+            height=215,
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
             column_config={
                 "ticker": st.column_config.TextColumn(f"Symbol ({len(df_l3)})", width="small"),
                 "action_status_badge": st.column_config.TextColumn("Entry Status", width="medium"),
+                "stop_loss_price": st.column_config.NumberColumn("Stop ($)", format="$%.2f"),
+                "risk_pct": st.column_config.NumberColumn("1R Risk", format="-%.1f%%"),
+                "target_price": st.column_config.NumberColumn("Target ($)", format="$%.2f"),
+                "recommended_shares": st.column_config.NumberColumn("Shares", format="%d"),
+                "position_value": st.column_config.NumberColumn("Position ($)", format="$%.0f"),
+                "portfolio_alloc_pct": st.column_config.NumberColumn("Alloc %", format="%.1f%%"),
                 "pivot_price": st.column_config.NumberColumn("Pivot", format="$%.2f"),
                 "dist_to_pivot_pct": st.column_config.NumberColumn("Pivot Dist", format="%+.1f%%"),
                 "vol_expansion_pct": st.column_config.NumberColumn("Vol Surge", format="%.0f%%"),

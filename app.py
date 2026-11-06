@@ -40,6 +40,7 @@ from src.ui.pills.layer1_pills import render_layer1_pills
 from src.ui.pills.layer2_pills import render_layer2_pills
 from src.ui.pills.layer3_pills import render_layer3_pills
 from src.ui.pills.layer4_pills import render_layer4_pills
+from src.ui.pills.layer5_pills import render_layer5_pills
 
 
 def main() -> None:
@@ -55,7 +56,7 @@ def main() -> None:
     render_layer0_pills(st.session_state["layer0_cfg"])
     render_layer1_pills(st.session_state["layer1_cfg"], sp500_bm)
 
-    # 4. Run Pluggable Multi-Layer Screening Pipeline (Layers 0 -> 1 -> 2 -> 3 -> 4 in <1s)
+    # 4. Run Pluggable Multi-Layer Screening Pipeline (Layers 0 -> 1 -> 2 -> 3 -> 4 -> 5 in <1s)
     result = run_screening_pipeline(
         df_universe=df_universe,
         sp500_bm=sp500_bm,
@@ -64,12 +65,14 @@ def main() -> None:
         layer2_cfg=st.session_state.get("layer2_cfg"),
         layer3_cfg=st.session_state.get("layer3_cfg"),
         layer4_cfg=st.session_state.get("layer4_cfg"),
+        layer5_cfg=st.session_state.get("layer5_cfg"),
     )
 
-    # 5. Render Layer 2 Industry, Layer 3 VCP Structure, & Layer 4 Entry Trigger Pills
+    # 5. Render Layer 2 Industry, Layer 3 VCP, Layer 4 Entry, & Layer 5 Risk Management Pills
     render_layer2_pills(st.session_state["layer2_cfg"], result.l2_meta)
     render_layer3_pills(st.session_state["layer3_cfg"], result.l3_meta)
     render_layer4_pills(st.session_state["layer4_cfg"], result.l4_meta)
+    render_layer5_pills(st.session_state["layer5_cfg"], result.l5_meta)
 
     # 6. Render Bottleneck Strip, Highlighted Watchlist Grid, & Live TradingView Chart Cockpit
     render_bottleneck_strip(result.summary_meta)

@@ -135,6 +135,27 @@ def get_default_layer4_config() -> Dict[str, Any]:
     }
 
 
+def get_default_layer5_config() -> Dict[str, Any]:
+    """
+    Default Layer 5 Risk Management & Position Sizing Template:
+    - Risk Gate: ON/OFF
+    - Account Equity: $100,000 (User portfolio size)
+    - Max Risk Per Trade: 1.0% ($1,000 max dollar risk on $100k account)
+    - Max Stop Loss Pct: 7.0% (Strict Minervini max risk boundary)
+    - Target Reward/Risk Ratio: 2.5 (2.5:1 reward-to-risk target)
+    - Max Portfolio Allocation Pct: 25.0% (Max 25% account per position)
+    """
+    return {
+        "l5_enabled": True,
+        "risk_gate_enabled": True,
+        "account_equity": 100000.0,
+        "max_risk_pct_per_trade": 1.0,
+        "max_stop_loss_pct": 7.0,
+        "min_reward_risk_ratio": 2.5,
+        "max_portfolio_allocation_pct": 25.0,
+    }
+
+
 def compute_dynamic_sp500_threshold(
     sp500_return_pct: float,
     use_dynamic: bool,
