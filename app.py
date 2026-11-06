@@ -35,6 +35,7 @@ from src.ui.pills import (
     render_layer1_pills,
     render_layer2_pills,
     render_layer3_pills,
+    render_layer4_pills,
 )
 
 
@@ -51,7 +52,7 @@ def main() -> None:
     render_layer0_pills(st.session_state["layer0_cfg"])
     render_layer1_pills(st.session_state["layer1_cfg"], sp500_bm)
 
-    # 4. Run Pluggable Multi-Layer Screening Pipeline (Layers 0 -> 1 -> 2 -> 3 in <1s)
+    # 4. Run Pluggable Multi-Layer Screening Pipeline (Layers 0 -> 1 -> 2 -> 3 -> 4 in <1s)
     result = run_screening_pipeline(
         df_universe=df_universe,
         sp500_bm=sp500_bm,
@@ -59,11 +60,13 @@ def main() -> None:
         layer1_cfg=st.session_state["layer1_cfg"],
         layer2_cfg=st.session_state.get("layer2_cfg"),
         layer3_cfg=st.session_state.get("layer3_cfg"),
+        layer4_cfg=st.session_state.get("layer4_cfg"),
     )
 
-    # 5. Render Layer 2 Industry Pills & Layer 3 VCP / EMA Structure Pills
+    # 5. Render Layer 2 Industry, Layer 3 VCP Structure, & Layer 4 Entry Trigger Pills
     render_layer2_pills(st.session_state["layer2_cfg"], result.l2_meta)
     render_layer3_pills(st.session_state["layer3_cfg"], result.l3_meta)
+    render_layer4_pills(st.session_state["layer4_cfg"], result.l4_meta)
 
     # 6. Render Bottleneck Strip, Highlighted Watchlist Grid, & Live TradingView Chart Cockpit
     render_bottleneck_strip(result.summary_meta)

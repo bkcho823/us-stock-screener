@@ -124,7 +124,8 @@ def render_tradingview_cockpit(df_view: pd.DataFrame) -> None:
     pass_sum = inspected_row.get("pass_summary", "")
     diag_b = inspected_row.get("diagnostic_badge", "")
     vcp_b = inspected_row.get("vcp_badge", "")
-    badges = [f"`{b}`" for b in [pass_sum, diag_b, vcp_b] if b]
+    act_b = inspected_row.get("action_status_badge", "")
+    badges = [f"`{b}`" for b in [act_b, pass_sum, diag_b, vcp_b] if b]
     badge_str = f"({' · '.join(badges)})" if badges else ""
 
     dr_hdr1, nav_prev_col, nav_next_col, dr_hdr2 = st.columns([2.9, 0.65, 0.85, 1.25])

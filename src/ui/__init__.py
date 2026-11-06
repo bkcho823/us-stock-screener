@@ -13,6 +13,7 @@ from src.ui.pills.layer0_pills import render_layer0_pills
 from src.ui.pills.layer1_pills import render_layer1_pills
 from src.ui.pills.layer2_pills import render_layer2_pills
 from src.ui.pills.layer3_pills import render_layer3_pills
+from src.ui.pills.layer4_pills import render_layer4_pills
 from src.ui.bottleneck_strip import render_bottleneck_strip
 from src.ui.watchlist_grid import render_watchlist_grid
 from src.ui.tradingview_cockpit import render_tradingview_cockpit
@@ -27,6 +28,7 @@ __all__ = [
     "render_layer1_pills",
     "render_layer2_pills",
     "render_layer3_pills",
+    "render_layer4_pills",
     "render_bottleneck_strip",
     "render_watchlist_grid",
     "render_tradingview_cockpit",

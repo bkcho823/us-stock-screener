@@ -14,6 +14,7 @@ from src.layers.layer2_sector import (
     evaluate_layer2_momentum_and_sector,
 )
 from src.layers.layer3_vcp import evaluate_layer3_vcp_and_structure
+from src.layers.layer4_entry import evaluate_layer4_entry_signals
 from src.layers.pipeline import run_screening_pipeline
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "compute_group_momentum_rankings",
     "evaluate_layer2_momentum_and_sector",
     "evaluate_layer3_vcp_and_structure",
+    "evaluate_layer4_entry_signals",
     "run_screening_pipeline",
 ]

@@ -116,6 +116,25 @@ def get_default_layer3_config() -> Dict[str, Any]:
     }
 
 
+def get_default_layer4_config() -> Dict[str, Any]:
+    """
+    Default Layer 4 Actionable Entry Trigger & Pivot Detection Template:
+    - Entry Trigger Gate: Filter for actionable candidates (Triggered / Buy Zone / On Deck)
+    - Min Volume Surge: >= 120.0% of 50-day average volume for confirmed breakouts
+    - Max Buy Zone Distance: <= 3.5% above pivot high (Minervini low-risk buy zone)
+    - On Deck Distance: Within 3.0% below pivot high (-3.0% to 0.0%)
+    - Action Status Filter: "ALL" (ALL, TRIGGERED_ONLY, BUY_ZONE_ONLY, ON_DECK_ONLY)
+    """
+    return {
+        "l4_enabled": True,
+        "entry_gate_enabled": True,
+        "min_vol_expansion_pct": 120.0,
+        "max_buy_zone_pct": 3.5,
+        "on_deck_pct": 3.0,
+        "action_status_filter": "ALL",
+    }
+
+
 def compute_dynamic_sp500_threshold(
     sp500_return_pct: float,
     use_dynamic: bool,

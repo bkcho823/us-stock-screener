@@ -20,6 +20,7 @@ from src.layers.layer0_universe import apply_layer0_filter
 from src.layers.layer1_trend import evaluate_layer1_conditions
 from src.layers.layer2_sector import evaluate_layer2_momentum_and_sector
 from src.layers.layer3_vcp import evaluate_layer3_vcp_and_structure
+from src.layers.layer4_entry import evaluate_layer4_entry_signals
 
 
 def run_screening_pipeline(
@@ -29,6 +30,7 @@ def run_screening_pipeline(
     layer1_cfg: Dict[str, Any],
     layer2_cfg: Dict[str, Any] | None = None,
     layer3_cfg: Dict[str, Any] | None = None,
+    layer4_cfg: Dict[str, Any] | None = None,
 ) -> ScreeningPipelineResult:
     """
     Runs active screening layers sequentially in <1 second and returns a structured
@@ -40,6 +42,8 @@ def run_screening_pipeline(
         layer2_cfg = {}
     if layer3_cfg is None:
         layer3_cfg = {}
+    if layer4_cfg is None:
+        layer4_cfg = {}
 
     # Step 1: Layer 0 — Candidate Universe Pre-Filter
     df_l0 = apply_layer0_filter(df_universe, layer0_cfg)
@@ -51,13 +55,18 @@ def run_screening_pipeline(
     df_l2, l2_meta = evaluate_layer2_momentum_and_sector(df_l1, df_l0, layer2_cfg)
 
     # Step 4: Layer 3 — Minervini VCP Pattern & JLaw EMA Structure Confirmation
-    df_final, l3_meta = evaluate_layer3_vcp_and_structure(df_l2, layer3_cfg)
+    df_l3, l3_meta = evaluate_layer3_vcp_and_structure(df_l2, layer3_cfg)
+
+    # Step 5: Layer 4 — Actionable Entry Trigger & Pivot Breakout Signals
+    df_final, l4_meta = evaluate_layer4_entry_signals(df_l3, layer4_cfg)
 
     # Merge metadata for easy UI consumption
     summary_meta["l2_meta"] = l2_meta
     summary_meta["l3_meta"] = l3_meta
+    summary_meta["l4_meta"] = l4_meta
     summary_meta["l2_qualified_count"] = l2_meta.get("l2_qualified_count", summary_meta.get("qualified_count", 0))
     summary_meta["l3_qualified_count"] = l3_meta.get("l3_qualified_count", summary_meta["l2_qualified_count"])
+    summary_meta["l4_qualified_count"] = l4_meta.get("l4_qualified_count", summary_meta["l3_qualified_count"])
 
     elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
     return ScreeningPipelineResult(
@@ -66,5 +75,6 @@ def run_screening_pipeline(
         summary_meta=summary_meta,
         l2_meta=l2_meta,
         l3_meta=l3_meta,
+        l4_meta=l4_meta,
         elapsed_ms=elapsed_ms,
     )

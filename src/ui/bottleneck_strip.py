@@ -27,6 +27,10 @@ def render_bottleneck_strip(summary_meta: Dict[str, Any]) -> None:
     l3_meta = summary_meta.get("l3_meta", {})
     l3_qual_cnt = l3_meta.get("l3_qualified_count", l2_qual_cnt)
 
+    l4_meta = summary_meta.get("l4_meta", {})
+    l4_qual_cnt = l4_meta.get("l4_qualified_count", l3_qual_cnt)
+    trig_cnt = l4_meta.get("triggered_count", 0)
+
     chips_html = []
     for b in summary_meta["condition_bottlenecks"]:
         if not b["enabled"]:
@@ -46,6 +50,7 @@ def render_bottleneck_strip(summary_meta: Dict[str, Any]) -> None:
         f'<span class="bn-chip" style="background:rgba(16,185,129,0.2);color:#34d399;"><b>L1 Trend-Pass:</b> {qual_cnt:,}</span>'
         f'<span class="bn-chip" style="background:rgba(14,165,233,0.22);color:#38bdf8;border:1px solid #0284c7;"><b>🎯 L2 Leaders:</b> {l2_qual_cnt:,}</span>'
         f'<span class="bn-chip" style="background:rgba(168,85,247,0.24);color:#c084fc;border:1px solid #9333ea;"><b>⚡ L3 VCP Setups:</b> {l3_qual_cnt:,}</span>'
+        f'<span class="bn-chip" style="background:rgba(236,72,153,0.22);color:#f472b6;border:1px solid #db2777;"><b>🚀 L4 Actionable:</b> {l4_qual_cnt:,} (🚀{trig_cnt})</span>'
         f'{lone_chip}'
         f'<span class="bn-chip" style="background:rgba(245,158,11,0.18);color:#fbbf24;"><b>Near-Miss ({max(0, active_cnt - 1)}/{active_cnt}):</b> {near_cnt:,}</span>'
         f'{"".join(chips_html)}</div>',

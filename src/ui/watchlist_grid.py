@@ -191,12 +191,14 @@ def render_watchlist_grid(
             | df_l3["company_name"].fillna("").str.lower().str.contains(q)
         ]
 
-    # Sort Layer 3 setups: Highest VCP Tightness Score first, then lowest contraction range
+    # Sort Layer 3/4 setups: Highest Action Priority (Triggered -> Buy Zone -> On Deck) then VCP Tightness Score
     if not df_l3.empty:
-        l3_sort_cols = [c for c in ["vcp_score", "composite_score", "rs_percentile"] if c in df_l3.columns]
+        status_rank_map = {"TRIGGERED": 0, "BUY_ZONE": 1, "ON_DECK": 2, "EXTENDED": 3, "BUILDING": 4}
+        df_l3["_status_rank"] = df_l3.get("action_status", pd.Series("BUILDING", index=df_l3.index)).map(status_rank_map).fillna(5)
+        sort_by_cols = [c for c in ["_status_rank", "vcp_score", "composite_score"] if c in df_l3.columns]
         df_l3 = df_l3.sort_values(
-            by=l3_sort_cols + (["last_contraction_pct"] if "last_contraction_pct" in df_l3.columns else []),
-            ascending=[False] * len(l3_sort_cols) + [True],
+            by=sort_by_cols,
+            ascending=[True, False, False][:len(sort_by_cols)],
         ).reset_index(drop=True)
         df_l3["tv_url"] = df_l3.apply(
             lambda r: build_tv_chart_url(str(r["exchange"]), str(r["ticker"]), active_layout_id),
@@ -294,27 +296,32 @@ def render_watchlist_grid(
     )
 
     # -------------------------------------------------------------------------
-    # 5. Render Table 2: Dedicated Layer 3 Minervini VCP & JLaw EMA Setups Table
+    # 5. Render Table 2: Dedicated Layer 3 & 4 Actionable Breakout Setups Table
     # -------------------------------------------------------------------------
     st.markdown("---")
+    l4_meta = summary_meta.get("l4_meta", {})
+    trig_cnt = l4_meta.get("triggered_count", 0)
+    bz_cnt = l4_meta.get("buy_zone_count", 0)
+    deck_cnt = l4_meta.get("on_deck_count", 0)
+
     l3_hdr1, l3_hdr2 = st.columns([3.8, 1.2])
     with l3_hdr1:
         st.markdown(
-            f"#### ⚡ **Layer 3: Minervini VCP & JLaw EMA Setups** &nbsp; "
+            f"#### ⚡ **Layer 3 & 4: VCP Breakout & Actionable Entry Setups** &nbsp; "
             f"<span style='background:rgba(56,189,248,0.18); color:#38bdf8; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.88rem;'>"
-            f"{len(df_l3)} Setups Fulfilled</span>",
+            f"{len(df_l3)} Setups ({trig_cnt} 🚀 Triggered · {bz_cnt} ⚡ Buy Zone · {deck_cnt} ⏳ On Deck)</span>",
             unsafe_allow_html=True,
         )
         st.caption(
-            "Stocks meeting strict Volatility Contraction (≤8%), supply exhaustion volume dry-up (≤65%), and 21/50 EMA structural alignment."
+            "Stocks meeting strict VCP Contraction & 21/50 EMA Structure with real-time Pivot Resistance ($), Buy Zone Proximity (%), and Volume Surge."
         )
     with l3_hdr2:
         if not df_l3.empty:
             csv_l3_bytes = df_l3.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label=f"⬇️ CSV L3 Setups ({len(df_l3)})",
+                label=f"⬇️ CSV L3/L4 Setups ({len(df_l3)})",
                 data=csv_l3_bytes,
-                file_name=f"l3_vcp_setups_{sp500_bm.get('as_of_date', 'eod')}.csv",
+                file_name=f"l4_actionable_setups_{sp500_bm.get('as_of_date', 'eod')}.csv",
                 mime="text/csv",
                 use_container_width=True,
                 key="dl_l3_setups_csv",
@@ -322,12 +329,16 @@ def render_watchlist_grid(
 
     if df_l3.empty:
         st.info(
-            "ℹ️ No stocks currently fulfill strict Layer 3 VCP criteria with your active thresholds. "
-            "Use the Layer 3 filter pills in the top bar above to relax the Max Contraction (≤8%) or Volume Dry-Up (≤65%) thresholds."
+            "ℹ️ No stocks currently fulfill strict Layer 3/4 VCP breakout criteria with your active thresholds. "
+            "Use the Layer 3/4 filter pills in the top bar above to relax contraction, volume dry-up, or volume surge thresholds."
         )
     else:
         t2_cols = [
             "ticker",
+            "action_status_badge",
+            "pivot_price",
+            "dist_to_pivot_pct",
+            "vol_expansion_pct",
             "vcp_score",
             "vcp_badge",
             "last_contraction_pct",
@@ -354,12 +365,16 @@ def render_watchlist_grid(
             styler_t2,
             key="l3_df_widget",
             use_container_width=True,
-            height=200,
+            height=210,
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
             column_config={
                 "ticker": st.column_config.TextColumn(f"Symbol ({len(df_l3)})", width="small"),
+                "action_status_badge": st.column_config.TextColumn("Entry Status", width="medium"),
+                "pivot_price": st.column_config.NumberColumn("Pivot", format="$%.2f"),
+                "dist_to_pivot_pct": st.column_config.NumberColumn("Pivot Dist", format="%+.1f%%"),
+                "vol_expansion_pct": st.column_config.NumberColumn("Vol Surge", format="%.0f%%"),
                 "vcp_score": st.column_config.ProgressColumn("VCP Score", format="%d", min_value=0, max_value=100),
                 "vcp_badge": st.column_config.TextColumn("VCP / EMA Structure", width="medium"),
                 "last_contraction_pct": st.column_config.NumberColumn("Tight %", format="%.1f%%"),
