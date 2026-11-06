@@ -24,6 +24,8 @@ class TestModularArchitectureImports(unittest.TestCase):
         self.assertTrue(callable(app.main))
         self.assertTrue(callable(src.providers.eod_sync_service.refresh_daily_market_data))
         self.assertTrue(callable(src.layers.run_screening_pipeline))
+        self.assertTrue(callable(src.ui.render_layer3_pills))
+        self.assertTrue(callable(src.ui.render_layer2_pills))
 
     def test_legacy_flat_files_removed_and_no_local_data_folder(self) -> None:
         legacy_paths = [

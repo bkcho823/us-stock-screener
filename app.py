@@ -9,6 +9,15 @@ Architecture: Clean 4-Tier Modular Design + Pluggable Multi-Layer Pipeline
 
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
+# Anchor application root directory to sys.path for robust Cloud runtime resolution
+_ROOT = Path(__file__).resolve().parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import streamlit as st
 
 from src.layers import run_screening_pipeline
@@ -17,13 +26,15 @@ from src.ui import (
     init_session_state,
     ensure_market_data_loaded,
     render_top_header,
+    render_bottleneck_strip,
+    render_watchlist_grid,
+    render_tradingview_cockpit,
+)
+from src.ui.pills import (
     render_layer0_pills,
     render_layer1_pills,
     render_layer2_pills,
     render_layer3_pills,
-    render_bottleneck_strip,
-    render_watchlist_grid,
-    render_tradingview_cockpit,
 )
 
 
