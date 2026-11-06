@@ -121,11 +121,16 @@ def render_tradingview_cockpit(df_view: pd.DataFrame) -> None:
     sel_exch = str(inspected_row.get("exchange", "NASDAQ"))
     tv_link = build_tv_chart_url(sel_exch, sel_ticker, active_layout_id)
 
+    pass_sum = inspected_row.get("pass_summary", "")
+    diag_b = inspected_row.get("diagnostic_badge", "")
+    vcp_b = inspected_row.get("vcp_badge", "")
+    badges = [f"`{b}`" for b in [pass_sum, diag_b, vcp_b] if b]
+    badge_str = f"({' · '.join(badges)})" if badges else ""
+
     dr_hdr1, nav_prev_col, nav_next_col, dr_hdr2 = st.columns([2.9, 0.65, 0.85, 1.25])
     with dr_hdr1:
         st.markdown(
-            f"#### 📈 **[{active_idx + 1}/{len(df_view)}] {sel_exch}:{sel_ticker}** — {sel_name} "
-            f"(`{inspected_row['pass_summary']}` · `{inspected_row['diagnostic_badge']}`)"
+            f"#### 📈 **[{active_idx + 1}/{len(df_view)}] {sel_exch}:{sel_ticker}** — {sel_name} {badge_str}"
         )
     with nav_prev_col:
         if st.button(
