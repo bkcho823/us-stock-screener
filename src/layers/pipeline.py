@@ -4,7 +4,8 @@ Executes enabled layers in sequence:
   Layer 0 (Universe Pre-Filter)
   -> Layer 1 (Trend & Momentum Template + Dynamic RS)
   -> Layer 2 (Momentum & Industry Strength Composite Scoring & Leader Ranking)
-  -> [Future Extension Hooks: Layer 3 VCP, Layer 4 Entry Pivot, Layer 5 Risk/Sizing]
+  -> Layer 3 (VCP Tightness & 21/50 EMA Structure Confirmation)
+  -> [Future Extension Hooks: Layer 4 Entry Pivot, Layer 5 Risk/Sizing]
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from src.layers.base import ScreeningPipelineResult
 from src.layers.layer0_universe import apply_layer0_filter
 from src.layers.layer1_trend import evaluate_layer1_conditions
 from src.layers.layer2_sector import evaluate_layer2_momentum_and_sector
+from src.layers.layer3_vcp import evaluate_layer3_vcp_and_structure
 
 
 def run_screening_pipeline(
@@ -26,6 +28,7 @@ def run_screening_pipeline(
     layer0_cfg: Dict[str, Any],
     layer1_cfg: Dict[str, Any],
     layer2_cfg: Dict[str, Any] | None = None,
+    layer3_cfg: Dict[str, Any] | None = None,
 ) -> ScreeningPipelineResult:
     """
     Runs active screening layers sequentially in <1 second and returns a structured
@@ -35,6 +38,8 @@ def run_screening_pipeline(
 
     if layer2_cfg is None:
         layer2_cfg = {}
+    if layer3_cfg is None:
+        layer3_cfg = {}
 
     # Step 1: Layer 0 — Candidate Universe Pre-Filter
     df_l0 = apply_layer0_filter(df_universe, layer0_cfg)
@@ -43,11 +48,16 @@ def run_screening_pipeline(
     df_l1, summary_meta = evaluate_layer1_conditions(df_l0, layer1_cfg, sp500_bm)
 
     # Step 3: Layer 2 — Momentum & Industry Strength Composite Scoring & Leader Ranking
-    df_final, l2_meta = evaluate_layer2_momentum_and_sector(df_l1, df_l0, layer2_cfg)
+    df_l2, l2_meta = evaluate_layer2_momentum_and_sector(df_l1, df_l0, layer2_cfg)
 
-    # Merge Layer 2 high-level counts into summary_meta for easy display
+    # Step 4: Layer 3 — Minervini VCP Pattern & JLaw EMA Structure Confirmation
+    df_final, l3_meta = evaluate_layer3_vcp_and_structure(df_l2, layer3_cfg)
+
+    # Merge metadata for easy UI consumption
     summary_meta["l2_meta"] = l2_meta
+    summary_meta["l3_meta"] = l3_meta
     summary_meta["l2_qualified_count"] = l2_meta.get("l2_qualified_count", summary_meta.get("qualified_count", 0))
+    summary_meta["l3_qualified_count"] = l3_meta.get("l3_qualified_count", summary_meta["l2_qualified_count"])
 
     elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
     return ScreeningPipelineResult(
@@ -55,5 +65,6 @@ def run_screening_pipeline(
         df_scored=df_final,
         summary_meta=summary_meta,
         l2_meta=l2_meta,
+        l3_meta=l3_meta,
         elapsed_ms=elapsed_ms,
     )

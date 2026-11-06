@@ -32,11 +32,14 @@ TV_COLUMNS = [
     "market_cap_basic",             # Market Cap in USD
     "SMA10",                        # 10-day Simple Moving Average
     "SMA20",                        # 20-day Simple Moving Average
+    "EMA20",                        # 20-day Exponential Moving Average (Proxy for 21EMA)
     "SMA50",                        # 50-day Simple Moving Average
+    "EMA50",                        # 50-day Exponential Moving Average
     "SMA100",                       # 100-day Simple Moving Average
     "SMA200",                       # 200-day Simple Moving Average
     "price_52_week_high",           # 52-Week High
     "price_52_week_low",            # 52-Week Low
+    "Volatility.D",                 # Daily Volatility (%)
     "Perf.1M",                      # 1-Month Performance (%)
     "Perf.3M",                      # 3-Month Performance (%)
     "Perf.6M",                      # 6-Month Performance (%)
@@ -102,11 +105,14 @@ def fetch_tradingview_baseline_universe(
             "market_cap_basic": "market_cap",
             "SMA10": "sma_10",
             "SMA20": "sma_20",
+            "EMA20": "ema_20",
             "SMA50": "sma_50",
+            "EMA50": "ema_50",
             "SMA100": "sma_100",
             "SMA200": "sma_200",
             "price_52_week_high": "high_52w",
             "price_52_week_low": "low_52w",
+            "Volatility.D": "volatility_d",
             "Perf.1M": "perf_1m",
             "Perf.3M": "perf_3m",
             "Perf.6M": "perf_6m",
@@ -116,8 +122,8 @@ def fetch_tradingview_baseline_universe(
 
     num_cols = [
         "close", "vol_1d", "vol_10d", "vol_30d", "vol_60d", "vol_90d",
-        "dollar_vol", "market_cap", "sma_10", "sma_20", "sma_50", "sma_100",
-        "sma_200", "high_52w", "low_52w", "perf_1m", "perf_3m", "perf_6m", "perf_12m",
+        "dollar_vol", "market_cap", "sma_10", "sma_20", "ema_20", "sma_50", "ema_50", "sma_100",
+        "sma_200", "high_52w", "low_52w", "volatility_d", "perf_1m", "perf_3m", "perf_6m", "perf_12m",
     ]
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")

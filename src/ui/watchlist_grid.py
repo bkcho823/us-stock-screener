@@ -38,11 +38,15 @@ def render_watchlist_grid(
     l2_meta = summary_meta.get("l2_meta", {})
     l2_qual_cnt = l2_meta.get("l2_qualified_count", qual_cnt)
 
-    tb1, tb2, tb3, tb4, tb5 = st.columns([2.6, 1.4, 1.2, 1.1, 0.7])
+    l3_meta = summary_meta.get("l3_meta", {})
+    l3_qual_cnt = l3_meta.get("l3_qualified_count", l2_qual_cnt)
+
+    tb1, tb2, tb3, tb4, tb5 = st.columns([2.8, 1.3, 1.2, 1.1, 0.6])
     with tb1:
         view_mode = st.radio(
             "Watchlist View Mode",
             options=[
+                f"⚡ L3 VCP Setups [{l3_qual_cnt}]",
                 f"🎯 L2 Leaders [{l2_qual_cnt}]",
                 f"🏆 All L1 Qualified [{qual_cnt}]",
                 f"🎯 Near-Miss [{near_cnt}]",
@@ -80,7 +84,9 @@ def render_watchlist_grid(
             label_visibility="collapsed",
         )
 
-    if view_mode.startswith("🎯 L2 Leaders"):
+    if view_mode.startswith("⚡ L3 VCP Setups"):
+        df_view = df_scored[df_scored.get("qualified_all", True) & df_scored.get("l2_qualified", True) & df_scored.get("l3_qualified", True)].copy()
+    elif view_mode.startswith("🎯 L2 Leaders"):
         df_view = df_scored[df_scored["qualified_all"] & df_scored.get("l2_qualified", True)].copy()
     elif view_mode.startswith("🏆 All L1 Qualified"):
         df_view = df_scored[df_scored["qualified_all"]].copy()
@@ -102,8 +108,8 @@ def render_watchlist_grid(
     # Explicit multi-tier sorting to guarantee the overall strongest stock is placed at Row #0
     if not df_view.empty:
         if sort_mode.startswith("🥇 Overall Strongest"):
-            # Primary: L2 Composite Score -> Secondary: Stock RS -> Tertiary: % of 52W High -> Quaternary: Perf 1M
-            sort_cols = [c for c in ["composite_score", "rs_percentile", "pct_of_52w_high", "perf_1m"] if c in df_view.columns]
+            # Primary: L2 Composite Score -> Secondary: VCP Score -> Tertiary: Stock RS -> Quaternary: % 52W High
+            sort_cols = [c for c in ["composite_score", "vcp_score", "rs_percentile", "pct_of_52w_high", "perf_1m"] if c in df_view.columns]
             df_view = df_view.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
         elif sort_mode.startswith("⚡ Pure RS Rating"):
             sort_cols = [c for c in ["rs_percentile", "composite_score", "pct_of_52w_high", "perf_1m"] if c in df_view.columns]
@@ -139,11 +145,15 @@ def render_watchlist_grid(
     display_cols = [
         "ticker",
         "composite_score",
+        "vcp_score",
+        "vcp_badge",
         "rs_percentile",
         "group_rs_percentile",
         "industry_rank_str",
         "close",
         "vol_1d",
+        "last_contraction_pct",
+        "vol_dryup_pct",
         "market_cap_b",
         "perf_1m",
         "perf_6m",
@@ -202,11 +212,15 @@ def render_watchlist_grid(
         column_config={
             "ticker": st.column_config.TextColumn(f"Symbol ({len(df_view)})", width="small"),
             "composite_score": st.column_config.NumberColumn("L2 Score", format="%.1f", width="small"),
+            "vcp_score": st.column_config.ProgressColumn("VCP Score", format="%d", min_value=0, max_value=100),
+            "vcp_badge": st.column_config.TextColumn("VCP / EMA Structure", width="medium"),
             "rs_percentile": st.column_config.ProgressColumn("Stock RS", format="%d", min_value=1, max_value=99),
             "group_rs_percentile": st.column_config.NumberColumn("Ind RS", format="%d", width="small"),
             "industry_rank_str": st.column_config.TextColumn("Industry & Rank", width="medium"),
             "close": st.column_config.NumberColumn("Price", format="$%.2f"),
             "vol_1d": st.column_config.NumberColumn("Vol", format="%d"),
+            "last_contraction_pct": st.column_config.NumberColumn("Tight %", format="%.1f%%"),
+            "vol_dryup_pct": st.column_config.NumberColumn("Dry %", format="%.0f%%"),
             "market_cap_b": st.column_config.NumberColumn("Mkt cap", format="$%.2fB"),
             "perf_1m": st.column_config.NumberColumn("Perf 1M", format="%+.2f%%"),
             "perf_6m": st.column_config.NumberColumn("Perf 6M", format="%+.2f%%"),

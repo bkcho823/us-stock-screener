@@ -9,7 +9,7 @@ from src.ui.state_manager import (
     ensure_market_data_loaded,
 )
 from src.ui.top_header import render_top_header
-from src.ui.pills import render_layer0_pills, render_layer1_pills, render_layer2_pills
+from src.ui.pills import render_layer0_pills, render_layer1_pills, render_layer2_pills, render_layer3_pills
 from src.ui.bottleneck_strip import render_bottleneck_strip
 from src.ui.watchlist_grid import render_watchlist_grid
 from src.ui.tradingview_cockpit import render_tradingview_cockpit
@@ -23,6 +23,7 @@ __all__ = [
     "render_layer0_pills",
     "render_layer1_pills",
     "render_layer2_pills",
+    "render_layer3_pills",
     "render_bottleneck_strip",
     "render_watchlist_grid",
     "render_tradingview_cockpit",

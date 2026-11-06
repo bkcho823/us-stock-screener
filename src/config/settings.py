@@ -97,6 +97,25 @@ def get_default_layer2_config() -> Dict[str, Any]:
     }
 
 
+def get_default_layer3_config() -> Dict[str, Any]:
+    """
+    Default Layer 3 VCP & EMA Pattern Confirmation Template:
+    - VCP Filter Gate: ON/OFF
+    - Max Last Contraction Range: <= 8.0% (Minervini tight consolidation)
+    - Max Volume Dry-up Ratio: <= 65.0% of 50-day average volume (institutional supply exhaustion)
+    - JLaw EMA Alignment: Close > 21EMA and 21EMA > 50EMA
+    - Pullback Support Cushion: Within 2.0% above 21EMA or 50EMA
+    """
+    return {
+        "l3_enabled": True,
+        "vcp_gate_enabled": True,
+        "require_ema_alignment": True,    # Close > 21EMA > 50EMA
+        "max_contraction_pct": 8.0,       # Final contraction amplitude <= 8%
+        "max_vol_dryup_pct": 65.0,        # Volume <= 65% of 50D/60D avg
+        "min_tightness_score": 60.0,      # VCP Tightness Score >= 60
+    }
+
+
 def compute_dynamic_sp500_threshold(
     sp500_return_pct: float,
     use_dynamic: bool,

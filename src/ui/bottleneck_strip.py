@@ -24,6 +24,9 @@ def render_bottleneck_strip(summary_meta: Dict[str, Any]) -> None:
     l2_qual_cnt = l2_meta.get("l2_qualified_count", qual_cnt)
     lone_cnt = l2_meta.get("lone_wolf_count", 0)
 
+    l3_meta = summary_meta.get("l3_meta", {})
+    l3_qual_cnt = l3_meta.get("l3_qualified_count", l2_qual_cnt)
+
     chips_html = []
     for b in summary_meta["condition_bottlenecks"]:
         if not b["enabled"]:
@@ -40,8 +43,9 @@ def render_bottleneck_strip(summary_meta: Dict[str, Any]) -> None:
     st.markdown(
         f'<div class="bottleneck-bar">'
         f'<span class="bn-chip" style="background:rgba(56,189,248,0.15);color:#38bdf8;"><b>Layer 0 Pool:</b> {l0_cnt:,}</span>'
-        f'<span class="bn-chip" style="background:rgba(16,185,129,0.2);color:#34d399;"><b>L1 Trend-Pass ({active_cnt}/{active_cnt}):</b> {qual_cnt:,}</span>'
-        f'<span class="bn-chip" style="background:rgba(14,165,233,0.22);color:#38bdf8;border:1px solid #0284c7;"><b>🎯 L2 Leader-Tier:</b> {l2_qual_cnt:,}</span>'
+        f'<span class="bn-chip" style="background:rgba(16,185,129,0.2);color:#34d399;"><b>L1 Trend-Pass:</b> {qual_cnt:,}</span>'
+        f'<span class="bn-chip" style="background:rgba(14,165,233,0.22);color:#38bdf8;border:1px solid #0284c7;"><b>🎯 L2 Leaders:</b> {l2_qual_cnt:,}</span>'
+        f'<span class="bn-chip" style="background:rgba(168,85,247,0.24);color:#c084fc;border:1px solid #9333ea;"><b>⚡ L3 VCP Setups:</b> {l3_qual_cnt:,}</span>'
         f'{lone_chip}'
         f'<span class="bn-chip" style="background:rgba(245,158,11,0.18);color:#fbbf24;"><b>Near-Miss ({max(0, active_cnt - 1)}/{active_cnt}):</b> {near_cnt:,}</span>'
         f'{"".join(chips_html)}</div>',

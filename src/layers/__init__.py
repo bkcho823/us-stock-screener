@@ -1,5 +1,5 @@
 """
-Domain / Screening Layers Package — Exports Layer 0, Layer 1, Layer 2, and the Pipeline.
+Domain / Screening Layers Package — Exports Layer 0, Layer 1, Layer 2, Layer 3, and the Pipeline.
 """
 
 from src.layers.base import ScreeningPipelineResult, ScreeningLayer
@@ -13,6 +13,7 @@ from src.layers.layer2_sector import (
     compute_group_momentum_rankings,
     evaluate_layer2_momentum_and_sector,
 )
+from src.layers.layer3_vcp import evaluate_layer3_vcp_and_structure
 from src.layers.pipeline import run_screening_pipeline
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "build_stock_condition_breakdown",
     "compute_group_momentum_rankings",
     "evaluate_layer2_momentum_and_sector",
+    "evaluate_layer3_vcp_and_structure",
     "run_screening_pipeline",
 ]

@@ -100,6 +100,18 @@ def enrich_with_yfinance_history(
     df = df.copy()
     df["sma_150"] = ((df["sma_100"] + df["sma_200"]) / 2.0).round(2)
     df["perf_9m"] = ((df["perf_6m"] + df["perf_12m"]) / 2.0).round(2)
+    
+    # Layer 3 VCP & EMA Defaults (fallback if yfinance is limited)
+    if "ema_21" not in df.columns:
+        df["ema_21"] = df.get("ema_20", df.get("sma_20", df["close"])).round(2)
+    if "ema_50" not in df.columns:
+        df["ema_50"] = df.get("sma_50", df["close"]).round(2)
+    if "last_contraction_pct" not in df.columns:
+        # Approximate last 10D contraction range from high/low if not enriched
+        df["last_contraction_pct"] = (df.get("volatility_d", 3.0) * 1.8).clip(2.0, 15.0).round(2)
+    if "vol_dryup_pct" not in df.columns:
+        df["vol_dryup_pct"] = ((df["vol_1d"] / df["vol_60d"].replace(0, 1)) * 100.0).clip(10.0, 200.0).round(1)
+
     for lb in [5, 10, 15, 20, 30, 40, 60]:
         df[f"sma_200_lag_{lb}"] = (
             df["sma_200"] - ((df["close"] - df["sma_200"]) / 200.0) * lb
@@ -111,6 +123,9 @@ def enrich_with_yfinance_history(
 
     sma150_map: Dict[str, float] = {}
     sma200_now_map: Dict[str, float] = {}
+    ema21_map: Dict[str, float] = {}
+    ema50_map: Dict[str, float] = {}
+    contraction_map: Dict[str, float] = {}
     perf9m_map: Dict[str, float] = {}
     lag_maps: Dict[int, Dict[str, float]] = {lb: {} for lb in [5, 10, 15, 20, 30, 40, 60]}
 
@@ -149,6 +164,19 @@ def enrich_with_yfinance_history(
                     if n < 155:
                         continue
 
+                    # Exact 21EMA and 50EMA for JLaw structure
+                    ema21_series = closes.ewm(span=21, adjust=False).mean()
+                    ema50_series = closes.ewm(span=50, adjust=False).mean()
+                    ema21_map[orig_sym] = round(float(ema21_series.iloc[-1]), 2)
+                    ema50_map[orig_sym] = round(float(ema50_series.iloc[-1]), 2)
+
+                    # Last 10-day contraction amplitude (High - Low) / High %
+                    if n >= 10:
+                        recent_high = float(closes.iloc[-10:].max())
+                        recent_low = float(closes.iloc[-10:].min())
+                        if recent_high > 0:
+                            contraction_map[orig_sym] = round(((recent_high - recent_low) / recent_high) * 100.0, 2)
+
                     sma150_val = float(closes.iloc[-150:].mean())
                     sma150_map[orig_sym] = round(sma150_val, 2)
 
@@ -177,6 +205,12 @@ def enrich_with_yfinance_history(
         df["sma_150"] = df["ticker"].map(sma150_map).fillna(df["sma_150"])
     if sma200_now_map:
         df["sma_200"] = df["ticker"].map(sma200_now_map).fillna(df["sma_200"])
+    if ema21_map:
+        df["ema_21"] = df["ticker"].map(ema21_map).fillna(df["ema_21"])
+    if ema50_map:
+        df["ema_50"] = df["ticker"].map(ema50_map).fillna(df["ema_50"])
+    if contraction_map:
+        df["last_contraction_pct"] = df["ticker"].map(contraction_map).fillna(df["last_contraction_pct"])
     if perf9m_map:
         df["perf_9m"] = df["ticker"].map(perf9m_map).fillna(df["perf_9m"])
     for lb in [5, 10, 15, 20, 30, 40, 60]:
