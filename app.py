@@ -18,6 +18,11 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+# Evict cached application modules to ensure fresh imports during Streamlit Cloud hot-reloads
+for _m in list(sys.modules.keys()):
+    if _m.startswith("src.ui") or _m.startswith("src.layers") or _m.startswith("src.config"):
+        sys.modules.pop(_m, None)
+
 import streamlit as st
 
 from src.layers import run_screening_pipeline
@@ -30,13 +35,11 @@ from src.ui import (
     render_watchlist_grid,
     render_tradingview_cockpit,
 )
-from src.ui.pills import (
-    render_layer0_pills,
-    render_layer1_pills,
-    render_layer2_pills,
-    render_layer3_pills,
-    render_layer4_pills,
-)
+from src.ui.pills.layer0_pills import render_layer0_pills
+from src.ui.pills.layer1_pills import render_layer1_pills
+from src.ui.pills.layer2_pills import render_layer2_pills
+from src.ui.pills.layer3_pills import render_layer3_pills
+from src.ui.pills.layer4_pills import render_layer4_pills
 
 
 def main() -> None:
