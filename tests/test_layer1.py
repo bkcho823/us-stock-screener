@@ -100,6 +100,42 @@ class TestLayer1Trend(unittest.TestCase):
         breakdown = build_stock_condition_breakdown(nvda_row, l1, meta)
         self.assertEqual(len(breakdown), 11)
 
+    def test_ipo_lifecycle_stage2_mode(self) -> None:
+        df_ipo = pd.DataFrame(
+            [
+                {
+                    "ticker": "RDDT",
+                    "company_name": "Reddit Inc",
+                    "exchange": "NYSE",
+                    "sector": "Technology",
+                    "market_cap_b": 10.5,
+                    "close": 65.0,
+                    "sma_10": 63.0,
+                    "sma_20": 60.0,
+                    "ema_21": 60.5,
+                    "sma_50": 54.0,
+                    "sma_150": float("nan"),
+                    "sma_200": float("nan"),
+                    "sma_200_lag_20": float("nan"),
+                    "bars_count": 75,
+                    "low_52w": 38.0,
+                    "high_52w": 67.0,
+                    "perf_1m": 14.0,
+                    "perf_3m": 42.0,
+                    "perf_6m": float("nan"),
+                    "rs_raw_score": 88.0,
+                }
+            ]
+        )
+        l1 = get_default_layer1_config()
+        l1["ipo_mode_enabled"] = True
+        l1["c8_min_rs_percentile"] = 50
+        sp500_bm = {"perf_1m_pct": 2.0, "perf_6m_pct": 8.0}
+        df_scored, meta = evaluate_layer1_conditions(df_ipo, l1, sp500_bm)
+        rddt = df_scored.iloc[0]
+        self.assertTrue(bool(rddt["is_ipo_stage2"]))
+        self.assertTrue(bool(rddt["qualified_all"]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -90,9 +90,17 @@ def evaluate_layer3_vcp_and_structure(
     if "vol_dryup_pct" not in df.columns:
         if "vol_60d" in df.columns and "vol_1d" in df.columns:
             vol_avg = df["vol_60d"].replace(0, np.nan).fillna(df["vol_1d"].replace(0, 1))
-            df["vol_dryup_pct"] = ((df["vol_1d"] / vol_avg) * 100.0).clip(10.0, 200.0).round(1)
+            v10 = df.get("vol_10d", df["vol_1d"]).fillna(df["vol_1d"])
+            prior_9d_vol = ((10.0 * v10 - df["vol_1d"]) / 9.0).clip(lower=v10 * 0.25)
+            df["vol_dryup_pct"] = ((prior_9d_vol / vol_avg) * 100.0).clip(10.0, 200.0).round(1)
         else:
             df["vol_dryup_pct"] = pd.Series(50.0, index=df.index)
+
+    if "adr_20_pct" not in df.columns:
+        if "volatility_d" in df.columns:
+            df["adr_20_pct"] = df["volatility_d"].fillna(3.0).clip(0.5, 25.0).round(2)
+        else:
+            df["adr_20_pct"] = pd.Series(3.5, index=df.index)
 
     l3_enabled = bool(layer3_cfg.get("l3_enabled", True))
     vcp_gate_on = bool(layer3_cfg.get("vcp_gate_enabled", True))
@@ -100,6 +108,7 @@ def evaluate_layer3_vcp_and_structure(
     max_contraction = float(layer3_cfg.get("max_contraction_pct", 8.0))
     max_vol_dryup = float(layer3_cfg.get("max_vol_dryup_pct", 65.0))
     min_tightness = float(layer3_cfg.get("min_tightness_score", 60.0))
+    min_adr_pct = float(layer3_cfg.get("min_adr_pct", 2.5))
 
     # 1. JLaw EMA Alignment: Close > 21EMA > 50EMA
     df["ema_aligned"] = (df["close"] > df["ema_21"]) & (df["ema_21"] > df["ema_50"])
@@ -108,9 +117,10 @@ def evaluate_layer3_vcp_and_structure(
     df["dist_to_ema21_pct"] = (((df["close"] - df["ema_21"]) / df["ema_21"]) * 100.0).round(2)
     df["is_ema_pullback"] = (df["dist_to_ema21_pct"] >= -1.5) & (df["dist_to_ema21_pct"] <= 2.5)
 
-    # 2. Minervini VCP Contraction & Volume Dry-up
+    # 2. Minervini VCP Contraction, Volume Dry-up, & JLaw Minimum ADR% Filter
     df["is_tight_contraction"] = df["last_contraction_pct"] <= max_contraction
     df["is_vol_dryup"] = df["vol_dryup_pct"] <= max_vol_dryup
+    df["is_adr_qualified"] = df["adr_20_pct"] >= min_adr_pct
 
     # 3. VCP Tightness Score (0-100)
     df["vcp_score"] = [
@@ -122,8 +132,8 @@ def evaluate_layer3_vcp_and_structure(
     if not l3_enabled or not vcp_gate_on:
         df["l3_qualified"] = True
     else:
-        # Stock passes if it has tight consolidation / VCP score >= threshold AND (if required) EMA alignment
-        cond = (df["vcp_score"] >= min_tightness) | (df["is_tight_contraction"] & df["is_vol_dryup"])
+        # Stock passes if it has tight consolidation / VCP score >= threshold, ADR% >= min_adr_pct, AND (if required) EMA alignment
+        cond = ((df["vcp_score"] >= min_tightness) | (df["is_tight_contraction"] & df["is_vol_dryup"])) & df["is_adr_qualified"]
         if require_ema:
             cond &= df["ema_aligned"]
         df["l3_qualified"] = cond
@@ -132,14 +142,17 @@ def evaluate_layer3_vcp_and_structure(
     def _make_vcp_badge(row: pd.Series) -> str:
         contraction = row["last_contraction_pct"]
         vol = row["vol_dryup_pct"]
+        adr = row["adr_20_pct"]
+        if not row["is_adr_qualified"]:
+            return f"🐢 Low ADR ({adr:.1f}% < {min_adr_pct:g}%)"
         if row["is_tight_contraction"] and row["is_vol_dryup"]:
-            return f"🎯 VCP Tight ({contraction:.1f}% · Vol {vol:.0f}%)"
+            return f"🎯 VCP Tight ({contraction:.1f}% · Dry {vol:.0f}% · ADR {adr:.1f}%)"
         if row["is_tight_contraction"]:
-            return f"📐 Tight Range ({contraction:.1f}%)"
+            return f"📐 Tight Range ({contraction:.1f}% · ADR {adr:.1f}%)"
         if row["is_ema_pullback"]:
-            return f"📈 EMA21 Pullback ({row['dist_to_ema21_pct']:+.1f}%)"
+            return f"📈 EMA21 Pullback ({row['dist_to_ema21_pct']:+.1f}% · ADR {adr:.1f}%)"
         if row["ema_aligned"]:
-            return f"✓ EMA Stacked (21>50)"
+            return f"✓ EMA Stacked (21>50 · ADR {adr:.1f}%)"
         return f"〰 Wide Range ({contraction:.1f}%)"
 
     df["vcp_badge"] = df.apply(_make_vcp_badge, axis=1)
@@ -160,9 +173,11 @@ def evaluate_layer3_vcp_and_structure(
         "max_contraction_pct": max_contraction,
         "max_vol_dryup_pct": max_vol_dryup,
         "min_tightness_score": min_tightness,
+        "min_adr_pct": min_adr_pct,
         "l3_qualified_count": int((df.get("qualified_all", True) & df.get("l2_qualified", True) & df["l3_qualified"]).sum()),
         "ema_aligned_count": int(df["ema_aligned"].sum()),
         "tight_consolidation_count": int(df["is_tight_contraction"].sum()),
+        "adr_qualified_count": int(df["is_adr_qualified"].sum()),
     }
 
     return df, summary_meta

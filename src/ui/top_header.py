@@ -27,7 +27,7 @@ def render_top_header(sp500_bm: Dict[str, Any]) -> None:
     l0 = st.session_state["layer0_cfg"]
     l1 = st.session_state["layer1_cfg"]
 
-    top_c1, top_c2, top_c3, top_c4, top_c5 = st.columns([2.9, 2.3, 1.1, 1.35, 1.1])
+    top_c1, top_c2, top_c3, top_c4, top_c5, top_c6 = st.columns([2.4, 1.55, 1.85, 0.95, 1.15, 0.95])
 
     with top_c1:
         db_badge = "🟢 Supabase DB" if is_supabase_configured() else "🟡 Session RAM"
@@ -37,6 +37,33 @@ def render_top_header(sp500_bm: Dict[str, Any]) -> None:
         )
 
     with top_c2:
+        # P2: JLaw Market Regime Traffic Light & Progressive Exposure Guide
+        regime_code = str(sp500_bm.get("market_regime", "GREEN_POWER_TREND"))
+        bm_sym = str(sp500_bm.get("symbol", "^GSPC"))
+        bm_close = float(sp500_bm.get("last_close", 0.0))
+        bm_ema21 = float(sp500_bm.get("ema_21", bm_close))
+        bm_sma50 = float(sp500_bm.get("sma_50", bm_close))
+        bm_dist21 = float(sp500_bm.get("dist_to_ema21_pct", 0.0))
+        rec_exp = str(sp500_bm.get("recommended_exposure_str", "1.0%–2.0% Risk · Full Offense"))
+
+        if regime_code == "GREEN_POWER_TREND":
+            reg_pill_lbl = f"🟢 Regime: POWER TREND ({bm_dist21:+.1f}%)"
+        elif regime_code == "YELLOW_PULLBACK":
+            reg_pill_lbl = f"🟡 Regime: PULLBACK ({bm_dist21:+.1f}%)"
+        else:
+            reg_pill_lbl = f"🔴 Regime: DEFENSIVE ({bm_dist21:+.1f}%)"
+
+        with st.popover(reg_pill_lbl, use_container_width=True):
+            st.markdown(f"**🚦 JLaw Market Regime Traffic Light ({bm_sym})**")
+            st.write(f"• **Status:** {sp500_bm.get('regime_badge', reg_pill_lbl)}")
+            st.write(f"• **{bm_sym} Close:** `{bm_close:,.2f}` vs **21 EMA:** `{bm_ema21:,.2f}` (`{bm_dist21:+.2f}%`)")
+            st.write(f"• **50 SMA:** `{bm_sma50:,.2f}` · **1M / 6M Perf:** `{sp500_bm.get('perf_1m_pct', 0):+.2f}%` / `{sp500_bm.get('perf_6m_pct', 0):+.2f}%`")
+            st.info(f"🎯 **Progressive Exposure Guidance:** {rec_exp}")
+            st.caption(
+                "JLaw USIC Rule: Press full size & pyramid only when S&P 500 / QQQ is above a rising 21 EMA and recent breakouts hold gains."
+            )
+
+    with top_c3:
         def _on_preset_change() -> None:
             chosen = st.session_state["preset_selector_widget"]
             apply_preset_to_state(chosen, presets)
@@ -52,7 +79,7 @@ def render_top_header(sp500_bm: Dict[str, Any]) -> None:
             label_visibility="collapsed",
         )
 
-    with top_c3:
+    with top_c4:
         with st.popover("💾 Save Preset", use_container_width=True):
             st.markdown("**Save Current Filter Pill Setup**")
             new_preset_name = st.text_input("Preset Name", placeholder="e.g. Above 200MA + 1+6M Per")
@@ -62,7 +89,7 @@ def render_top_header(sp500_bm: Dict[str, Any]) -> None:
                 st.toast(f"Saved preset: {new_preset_name.strip()}", icon="💾")
                 st.rerun()
 
-    with top_c4:
+    with top_c5:
         cur_layout = extract_tv_layout_id(st.session_state.get("tv_layout_id", ""))
         layout_btn_lbl = f"⚙️ BKCHO Chart ({cur_layout})" if cur_layout else "⚙️ Set BKCHO Chart URL"
         with st.popover(layout_btn_lbl, use_container_width=True):
@@ -83,7 +110,7 @@ def render_top_header(sp500_bm: Dict[str, Any]) -> None:
                 st.toast(f"Saved BKCHO Chart Layout ID: {extracted or 'Default'}", icon="✅")
                 st.rerun()
 
-    with top_c5:
+    with top_c6:
         if st.button("🔄 Refresh Data", use_container_width=True):
             prog = st.progress(0, text="Refreshing live market data...")
             df_universe, new_bm = refresh_daily_market_data(

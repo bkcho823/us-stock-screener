@@ -46,6 +46,7 @@ TV_COLUMNS = [
     "Perf.Y",                       # 12-Month Performance (%)
     "sector",                       # Sector name
     "industry",                     # Industry name
+    "earnings_release_next_date",   # Next Earnings Release Timestamp (Unix sec, optional)
 ]
 
 
@@ -82,9 +83,9 @@ def fetch_tradingview_baseline_universe(
     records = []
     for item in data:
         d = item.get("d", [])
-        if len(d) < len(TV_COLUMNS):
+        if len(d) < len(TV_COLUMNS) - 1:
             continue
-        row = dict(zip(TV_COLUMNS, d))
+        row = dict(zip(TV_COLUMNS[:len(d)], d))
         records.append(row)
 
     df = pd.DataFrame(records)
@@ -117,6 +118,7 @@ def fetch_tradingview_baseline_universe(
             "Perf.3M": "perf_3m",
             "Perf.6M": "perf_6m",
             "Perf.Y": "perf_12m",
+            "earnings_release_next_date": "next_earnings_ts",
         }
     )
 
@@ -126,7 +128,23 @@ def fetch_tradingview_baseline_universe(
         "sma_200", "high_52w", "low_52w", "volatility_d", "perf_1m", "perf_3m", "perf_6m", "perf_12m",
     ]
     for c in num_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    if "next_earnings_ts" in df.columns:
+        import time as _time
+        now_ts = _time.time()
+        ts_num = pd.to_numeric(df["next_earnings_ts"], errors="coerce")
+        days_diff = np.floor((ts_num - now_ts) / 86400.0)
+        df["days_to_earnings"] = np.where(
+            ts_num.notna() & (days_diff >= -1) & (days_diff <= 180),
+            np.maximum(0, days_diff),
+            999,
+        ).astype(int)
+    else:
+        df["days_to_earnings"] = 999
+
+    df["adr_20_pct"] = df.get("volatility_d", pd.Series(3.0, index=df.index)).fillna(3.0).clip(0.5, 25.0).round(2)
 
     df["market_cap_b"] = (df["market_cap"] / 1e9).round(3)
     df["dollar_vol_m"] = np.where(

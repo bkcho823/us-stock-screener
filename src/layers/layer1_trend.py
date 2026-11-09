@@ -69,22 +69,37 @@ def evaluate_layer1_conditions(
     else:
         df["rs_percentile"] = 99
 
-    # C1: Close > SMA150 and Close > SMA200
-    df["c1_pass"] = (df["close"] > df["sma_150"]) & (df["close"] > df["sma_200"])
+    ipo_mode = bool(layer1_cfg.get("ipo_mode_enabled", True))
+    ema21_col = df.get("ema_21", df.get("ema_20", df.get("sma_20", df["close"])))
+    sma20_col = df.get("sma_20", ema21_col)
+    bars_col = df.get("bars_count", pd.Series(252, index=df.index))
+    is_ipo_stock = (df["sma_200"].isna() | (df["sma_200"] <= 0) | (bars_col < 200)) & (df["sma_50"] > 0)
+    df["is_ipo_stage2"] = ipo_mode & is_ipo_stock
 
-    # C2: SMA150 > SMA200
-    df["c2_pass"] = df["sma_150"] > df["sma_200"]
+    # C1: Close > SMA150 and Close > SMA200 (IPO fallback: Close > EMA21 & Close > SMA50)
+    c1_std = (df["close"] > df["sma_150"]) & (df["close"] > df["sma_200"])
+    c1_ipo = (df["close"] > ema21_col) & (df["close"] > df["sma_50"])
+    df["c1_pass"] = np.where(df["is_ipo_stage2"], c1_ipo, c1_std)
 
-    # C3: SMA200 trending upward over N lookback trading days
+    # C2: SMA150 > SMA200 (IPO fallback: EMA21 > SMA50)
+    c2_std = df["sma_150"] > df["sma_200"]
+    c2_ipo = ema21_col > df["sma_50"]
+    df["c2_pass"] = np.where(df["is_ipo_stage2"], c2_ipo, c2_std)
+
+    # C3: SMA200 trending upward over N lookback trading days (IPO fallback: EMA21 >= SMA20)
     lookback_n = int(layer1_cfg.get("c3_lookback_days", 20))
     lag_col = _pick_nearest_lag_column(lookback_n)
     if lag_col not in df.columns:
         lag_col = "sma_200_lag_20"
     df["sma_200_lookback_val"] = df[lag_col]
-    df["c3_pass"] = df["sma_200"] > df["sma_200_lookback_val"]
+    c3_std = df["sma_200"] > df["sma_200_lookback_val"]
+    c3_ipo = ema21_col >= sma20_col
+    df["c3_pass"] = np.where(df["is_ipo_stage2"], c3_ipo, c3_std)
 
-    # C4: SMA50 > SMA150 > SMA200
-    df["c4_pass"] = (df["sma_50"] > df["sma_150"]) & (df["sma_150"] > df["sma_200"])
+    # C4: SMA50 > SMA150 > SMA200 (IPO fallback: Close > EMA21 > SMA50)
+    c4_std = (df["sma_50"] > df["sma_150"]) & (df["sma_150"] > df["sma_200"])
+    c4_ipo = (df["close"] > ema21_col) & (ema21_col > df["sma_50"])
+    df["c4_pass"] = np.where(df["is_ipo_stage2"], c4_ipo, c4_std)
 
     # C5: Close > SMA50
     df["c5_pass"] = df["close"] > df["sma_50"]
@@ -129,7 +144,12 @@ def evaluate_layer1_conditions(
         neg_mult=float(layer1_cfg.get("c11_neg_multiplier", 0.5)),
         manual_pct=float(layer1_cfg.get("c11_manual_min_pct", 24.0)),
     )
-    df["c11_pass"] = df["perf_6m"].fillna(-999.0) > y_6m_thresh
+    perf_6m_eff = np.where(
+        df["is_ipo_stage2"] & df["perf_6m"].isna(),
+        df.get("perf_3m", df.get("perf_1m", pd.Series(-999.0, index=df.index))).fillna(-999.0),
+        df["perf_6m"].fillna(-999.0),
+    )
+    df["c11_pass"] = perf_6m_eff > y_6m_thresh
 
     # Count enabled conditions & build bottleneck detector statistics
     active_ids: List[str] = []
@@ -171,6 +191,8 @@ def evaluate_layer1_conditions(
             return "⚪ No Active Rules"
         missed = [SHORT_DIAGNOSTIC_LABELS[cid] for cid in active_ids if not row[f"{cid}_pass"]]
         if not missed:
+            if row.get("is_ipo_stage2", False):
+                return f"🚀 IPO Stage 2 ({len(active_ids)}/{len(active_ids)})"
             return f"✅ All {len(active_ids)} Passed"
         if len(missed) == 1:
             return f"⚠️ Missed: {missed[0]}"

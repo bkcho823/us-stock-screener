@@ -38,7 +38,7 @@ def _render_tradingview_advanced_chart(exchange: str, ticker: str, height: int =
         "calendar": False,
         "studies": [
             {"id": "MASimple@tv-basicstudies", "inputs": {"length": 10}},
-            {"id": "MASimple@tv-basicstudies", "inputs": {"length": 20}},
+            {"id": "MAExp@tv-basicstudies", "inputs": {"length": 21}},
             {"id": "MASimple@tv-basicstudies", "inputs": {"length": 50}},
             {"id": "MASimple@tv-basicstudies", "inputs": {"length": 150}},
             {"id": "MASimple@tv-basicstudies", "inputs": {"length": 200}},
@@ -126,7 +126,9 @@ def render_tradingview_cockpit(df_view: pd.DataFrame) -> None:
     vcp_b = inspected_row.get("vcp_badge", "")
     act_b = inspected_row.get("action_status_badge", "")
     risk_b = inspected_row.get("risk_badge", "")
-    badges = [f"`{b}`" for b in [act_b, risk_b, pass_sum, diag_b, vcp_b] if b]
+    er_b = inspected_row.get("earnings_badge", "")
+    er_display = er_b if er_b and er_b != "✅ Clear" else ""
+    badges = [f"`{b}`" for b in [act_b, risk_b, er_display, pass_sum, diag_b, vcp_b] if b]
     badge_str = f"({' · '.join(badges)})" if badges else ""
 
     dr_hdr1, nav_prev_col, nav_next_col, dr_hdr2 = st.columns([2.9, 0.65, 0.85, 1.25])

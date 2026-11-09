@@ -75,6 +75,7 @@ def get_default_layer1_config() -> Dict[str, Any]:
         "c11_pos_multiplier": 2.0,
         "c11_neg_multiplier": 0.5,
         "c11_manual_min_pct": 24.0,
+        "ipo_mode_enabled": True,         # P2: Allow <200-bar IPO/Spin-off bases (RDDT, GEV) via Close > EMA21 > SMA50
     }
 
 
@@ -101,18 +102,19 @@ def get_default_layer3_config() -> Dict[str, Any]:
     """
     Default Layer 3 VCP & EMA Pattern Confirmation Template:
     - VCP Filter Gate: ON/OFF
-    - Max Last Contraction Range: <= 8.0% (Minervini tight consolidation)
+    - Max Last Contraction Range: <= 8.0% (Minervini tight consolidation over pre-breakout window [T-10:T-1])
     - Max Volume Dry-up Ratio: <= 65.0% of 50-day average volume (institutional supply exhaustion)
+    - Min ADR% (20D Average Daily Range): >= 2.5% (P1: filters out sleepy low-beta REITs/Utilities/Banks)
     - JLaw EMA Alignment: Close > 21EMA and 21EMA > 50EMA
-    - Pullback Support Cushion: Within 2.0% above 21EMA or 50EMA
     """
     return {
         "l3_enabled": True,
         "vcp_gate_enabled": True,
         "require_ema_alignment": True,    # Close > 21EMA > 50EMA
-        "max_contraction_pct": 8.0,       # Final contraction amplitude <= 8%
-        "max_vol_dryup_pct": 65.0,        # Volume <= 65% of 50D/60D avg
+        "max_contraction_pct": 8.0,       # Pre-breakout 10D contraction amplitude <= 8%
+        "max_vol_dryup_pct": 65.0,        # Pre-breakout coil volume <= 65% of 50D/60D avg
         "min_tightness_score": 60.0,      # VCP Tightness Score >= 60
+        "min_adr_pct": 2.5,               # Minimum 20-day Average Daily Range (%) to prevent low-beta crowding
     }
 
 
@@ -142,8 +144,10 @@ def get_default_layer5_config() -> Dict[str, Any]:
     - Account Equity: $100,000 (User portfolio size)
     - Max Risk Per Trade: 1.0% ($1,000 max dollar risk on $100k account)
     - Max Stop Loss Pct: 7.0% (Strict Minervini max risk boundary)
-    - Target Reward/Risk Ratio: 2.5 (2.5:1 reward-to-risk target)
+    - Target Reward/Risk Ratio: 2.5 (2.5:1 reward-to-risk target for 50% scale-out)
     - Max Portfolio Allocation Pct: 25.0% (Max 25% account per position)
+    - Exit Model: "JLAW_HYBRID" (Sell 50% at +2.5R, move stop to Breakeven, trail 50% on 21 EMA)
+    - Earnings Guard Days: 10 (Flag binary earnings risk within 10 calendar days)
     """
     return {
         "l5_enabled": True,
@@ -153,6 +157,8 @@ def get_default_layer5_config() -> Dict[str, Any]:
         "max_stop_loss_pct": 7.0,
         "min_reward_risk_ratio": 2.5,
         "max_portfolio_allocation_pct": 25.0,
+        "exit_model": "JLAW_HYBRID",
+        "earnings_guard_days": 10,
     }
 
 

@@ -191,14 +191,14 @@ def render_watchlist_grid(
             | df_l3["company_name"].fillna("").str.lower().str.contains(q)
         ]
 
-    # Sort Layer 3/4 setups: Highest Action Priority (Triggered -> Buy Zone -> On Deck) then VCP Tightness Score
+    # Sort Layer 3/4 setups: Highest Action Priority (Triggered -> Buy Zone -> On Deck), then L2 Leadership Composite Score, then VCP Tightness Score
     if not df_l3.empty:
         status_rank_map = {"TRIGGERED": 0, "BUY_ZONE": 1, "ON_DECK": 2, "EXTENDED": 3, "BUILDING": 4}
         df_l3["_status_rank"] = df_l3.get("action_status", pd.Series("BUILDING", index=df_l3.index)).map(status_rank_map).fillna(5)
-        sort_by_cols = [c for c in ["_status_rank", "vcp_score", "composite_score"] if c in df_l3.columns]
+        sort_by_cols = [c for c in ["_status_rank", "composite_score", "vcp_score", "rs_percentile"] if c in df_l3.columns]
         df_l3 = df_l3.sort_values(
             by=sort_by_cols,
-            ascending=[True, False, False][:len(sort_by_cols)],
+            ascending=[True, False, False, False][:len(sort_by_cols)],
         ).reset_index(drop=True)
         df_l3["tv_url"] = df_l3.apply(
             lambda r: build_tv_chart_url(str(r["exchange"]), str(r["ticker"]), active_layout_id),
@@ -336,6 +336,8 @@ def render_watchlist_grid(
         t2_cols = [
             "ticker",
             "action_status_badge",
+            "exit_plan_badge",
+            "earnings_badge",
             "stop_loss_price",
             "risk_pct",
             "target_price",
@@ -345,13 +347,14 @@ def render_watchlist_grid(
             "pivot_price",
             "dist_to_pivot_pct",
             "vol_expansion_pct",
+            "adr_20_pct",
+            "composite_score",
             "vcp_score",
             "vcp_badge",
             "last_contraction_pct",
             "vol_dryup_pct",
             "dist_to_ema21_pct",
             "close",
-            "composite_score",
             "rs_percentile",
             "group_rs_percentile",
             "industry_rank_str",
@@ -378,22 +381,25 @@ def render_watchlist_grid(
             column_config={
                 "ticker": st.column_config.TextColumn(f"Symbol ({len(df_l3)})", width="small"),
                 "action_status_badge": st.column_config.TextColumn("Entry Status", width="medium"),
+                "exit_plan_badge": st.column_config.TextColumn("JLaw Exit Plan", width="large"),
+                "earnings_badge": st.column_config.TextColumn("ER Guard", width="small"),
                 "stop_loss_price": st.column_config.NumberColumn("Stop ($)", format="$%.2f"),
                 "risk_pct": st.column_config.NumberColumn("1R Risk", format="-%.1f%%"),
-                "target_price": st.column_config.NumberColumn("Target ($)", format="$%.2f"),
+                "target_price": st.column_config.NumberColumn("+2.5R ($)", format="$%.2f"),
                 "recommended_shares": st.column_config.NumberColumn("Shares", format="%d"),
                 "position_value": st.column_config.NumberColumn("Position ($)", format="$%.0f"),
                 "portfolio_alloc_pct": st.column_config.NumberColumn("Alloc %", format="%.1f%%"),
                 "pivot_price": st.column_config.NumberColumn("Pivot", format="$%.2f"),
                 "dist_to_pivot_pct": st.column_config.NumberColumn("Pivot Dist", format="%+.1f%%"),
                 "vol_expansion_pct": st.column_config.NumberColumn("Vol Surge", format="%.0f%%"),
+                "adr_20_pct": st.column_config.NumberColumn("ADR %", format="%.1f%%"),
+                "composite_score": st.column_config.NumberColumn("L2 Score", format="%.1f", width="small"),
                 "vcp_score": st.column_config.ProgressColumn("VCP Score", format="%d", min_value=0, max_value=100),
                 "vcp_badge": st.column_config.TextColumn("VCP / EMA Structure", width="medium"),
                 "last_contraction_pct": st.column_config.NumberColumn("Tight %", format="%.1f%%"),
                 "vol_dryup_pct": st.column_config.NumberColumn("Dry %", format="%.0f%%"),
                 "dist_to_ema21_pct": st.column_config.NumberColumn("21 EMA Dist", format="%+.1f%%"),
                 "close": st.column_config.NumberColumn("Price", format="$%.2f"),
-                "composite_score": st.column_config.NumberColumn("L2 Score", format="%.1f", width="small"),
                 "rs_percentile": st.column_config.ProgressColumn("Stock RS", format="%d", min_value=1, max_value=99),
                 "group_rs_percentile": st.column_config.NumberColumn("Ind RS", format="%d", width="small"),
                 "industry_rank_str": st.column_config.TextColumn("Industry & Rank", width="medium"),

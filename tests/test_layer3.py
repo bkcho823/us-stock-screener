@@ -69,6 +69,25 @@ class TestLayer3VCP(unittest.TestCase):
         bear_row = df_out[df_out["ticker"] == "BEAR"].iloc[0]
         self.assertFalse(bear_row["l3_qualified"])
 
+    def test_layer3_adr_filter_excludes_low_beta_crawlers(self) -> None:
+        df_l2 = pd.DataFrame([
+            {
+                "ticker": "FAST", "close": 100.0, "ema_21": 96.0, "ema_50": 90.0,
+                "last_contraction_pct": 4.2, "vol_dryup_pct": 42.0, "adr_20_pct": 4.5,
+                "composite_score": 90.0, "rs_percentile": 92, "qualified_all": True, "l2_qualified": True
+            },
+            {
+                "ticker": "SLOW_BANK", "close": 50.0, "ema_21": 49.0, "ema_50": 48.0,
+                "last_contraction_pct": 3.8, "vol_dryup_pct": 40.0, "adr_20_pct": 1.6,
+                "composite_score": 82.0, "rs_percentile": 85, "qualified_all": True, "l2_qualified": True
+            },
+        ])
+        l3_cfg = get_default_layer3_config()
+        l3_cfg["min_adr_pct"] = 3.2
+        df_out, meta = evaluate_layer3_vcp_and_structure(df_l2, l3_cfg)
+        self.assertTrue(bool(df_out[df_out["ticker"] == "FAST"].iloc[0]["l3_qualified"]))
+        self.assertFalse(bool(df_out[df_out["ticker"] == "SLOW_BANK"].iloc[0]["l3_qualified"]))
+
 
 if __name__ == "__main__":
     unittest.main()

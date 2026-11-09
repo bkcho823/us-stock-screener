@@ -98,6 +98,33 @@ class TestLayer5Risk(unittest.TestCase):
             else:
                 self.assertFalse(row["l5_qualified"])
 
+    def test_jlaw_hybrid_exit_and_earnings_guard(self) -> None:
+        df_jlaw = pd.DataFrame([
+            {
+                "ticker": "NVDA",
+                "close": 100.0,
+                "last_contraction_pct": 4.0,
+                "ema_21": 96.5,
+                "days_to_earnings": 5,
+                "qualified_all": True,
+                "l2_qualified": True,
+                "l3_qualified": True,
+                "l4_qualified": True,
+            }
+        ])
+        cfg = {
+            "account_equity": 100000.0,
+            "max_risk_pct_per_trade": 1.0,
+            "exit_model": "JLAW_HYBRID",
+            "earnings_guard_days": 10,
+        }
+        df_out, meta = evaluate_layer5_position_sizing(df_jlaw, cfg)
+        row = df_out.iloc[0]
+        self.assertEqual(meta["exit_model"], "JLAW_HYBRID")
+        self.assertIn("Trail 21EMA", row["exit_plan_badge"])
+        self.assertIn("⚠️ ER in 5d", row["earnings_badge"])
+        self.assertGreater(int(row["partial_shares"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

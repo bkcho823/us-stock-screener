@@ -56,23 +56,40 @@ def evaluate_layer4_entry_signals(
     vol_1d = df.get("vol_1d", pd.Series(1, index=df.index))
     df["vol_expansion_pct"] = ((vol_1d / vol_avg.replace(0, np.nan)) * 100.0).fillna(100.0).clip(10.0, 500.0).round(1)
 
-    # 2. Pivot Resistance Price Calculation
+    # 2. Pivot Resistance Price Calculation (P0 Fix: Pre-Breakout 10D Coil Swing High & Prior 52W High)
     pivot_prices = []
     for _, row in df.iterrows():
         close = float(row.get("close", 10.0))
         high_52w = float(row.get("high_52w", close))
+        prior_52w = float(row.get("prior_high_52w", high_52w))
+        ref_52w = prior_52w if prior_52w > 0 else high_52w
+        coil_high = float(row.get("coil_pivot_high", 0.0))
         contraction = float(row.get("last_contraction_pct", 6.0))
 
-        if high_52w > 0 and close >= high_52w:
-            # Breaking out at/above 52W high: pivot resistance is the 52W high level
-            pivot = high_52w
-        elif high_52w > 0 and ((high_52w - close) / close) <= 0.08:
+        if coil_high > 0 and coil_high != high_52w:
+            # Enriched with exact 10-day pre-breakout swing high [T-10 : T-1]
+            if ref_52w > 0 and close >= ref_52w and ((ref_52w - coil_high) / ref_52w) <= 0.03:
+                pivot = round(ref_52w, 2)
+            else:
+                pivot = round(coil_high, 2)
+        elif ref_52w > 0 and close >= ref_52w:
+            # Breaking out at/above prior 52W high: pivot resistance is the prior 52W high level
+            pivot = round(ref_52w, 2)
+        elif ref_52w > 0 and ((ref_52w - close) / close) <= 0.08:
             # Within 8% of 52W high: consolidation resistance is the 52W high
-            pivot = high_52w
+            pivot = round(ref_52w, 2)
+        elif coil_high > 0:
+            pivot = round(coil_high, 2)
         else:
-            # Consolidation resistance pivot: local swing high of the final coil
-            offset = max(1.0, min(contraction * 0.5, 6.0))
-            pivot = round(close * (1.0 + (offset / 100.0)), 2)
+            # Un-enriched fallback: if breaking out above SMA10 with a mid-base coil, anchor to SMA10; else 52W high
+            sma_10_val = float(row.get("sma_10", 0.0) or 0.0)
+            offset = max(0.8, min(contraction * 0.35, 4.5))
+            if sma_10_val > 0 and sma_10_val < close:
+                pivot = round(sma_10_val * (1.0 + (offset / 100.0)), 2)
+            elif ref_52w > 0:
+                pivot = round(ref_52w, 2)
+            else:
+                pivot = round(close * (1.0 + (offset / 100.0)), 2)
         pivot_prices.append(pivot)
 
     df["pivot_price"] = pivot_prices

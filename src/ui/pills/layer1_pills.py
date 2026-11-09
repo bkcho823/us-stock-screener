@@ -35,9 +35,17 @@ def render_layer1_pills(l1: Dict[str, Any], sp500_bm: Dict[str, Any]) -> None:
     # Row 1: 6 Wide Layer 1 Trend Pills (C1, C2, C3, C4, C5, C9)
     l1_r1 = st.columns(6)
     with l1_r1[0]:
-        p_c1 = "✅ C1: P > SMA150/200" if l1["c1_enabled"] else "⚪ C1: P > SMA150/200"
+        ipo_on = bool(l1.get("ipo_mode_enabled", True))
+        ipo_tag = " (+IPO)" if ipo_on else ""
+        p_c1 = f"✅ C1: P > 150/200{ipo_tag}" if l1["c1_enabled"] else "⚪ C1: P > 150/200"
         with st.popover(p_c1, use_container_width=True):
             l1["c1_enabled"] = st.toggle("Enable C1: Price > SMA 150 & SMA 200", value=bool(l1.get("c1_enabled", True)))
+            st.markdown("---")
+            l1["ipo_mode_enabled"] = st.toggle(
+                "🚀 Enable IPO Lifecycle Mode (<200D Bars)",
+                value=ipo_on,
+                help="Allows recent IPOs & spin-offs (<200 trading bars, e.g. RDDT, GEV) to pass C1–C4 using JLaw's IPO Stage 2 stack (Close > EMA21 > SMA50).",
+            )
     with l1_r1[1]:
         p_c2 = "✅ C2: SMA150 > 200" if l1["c2_enabled"] else "⚪ C2: SMA150 > 200"
         with st.popover(p_c2, use_container_width=True):

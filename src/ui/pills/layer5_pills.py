@@ -20,20 +20,32 @@ def render_layer5_pills(l5: Dict[str, Any], l5_meta: Dict[str, Any] | None = Non
     max_stop = float(l5.get("max_stop_loss_pct", 7.0))
     rr_ratio = float(l5.get("min_reward_risk_ratio", 2.5))
     max_alloc = float(l5.get("max_portfolio_allocation_pct", 25.0))
+    exit_model = str(l5.get("exit_model", "JLAW_HYBRID")).upper()
+    er_guard_days = int(l5.get("earnings_guard_days", 10))
 
     max_dollar_risk = account_equity * (risk_pct / 100.0)
     max_capital_alloc = account_equity * (max_alloc / 100.0)
     avg_risk = l5_meta.get("avg_risk_pct", max_stop * 0.7)
 
-    l5_cols = st.columns([1.6, 1.6, 1.4, 1.4])
+    l5_cols = st.columns([1.6, 1.5, 1.4, 1.5])
 
-    # 1. Pill: Stop-Loss & Reward/Risk Gate
+    # 1. Pill: Stop-Loss & JLaw Exit Strategy Gate
     with l5_cols[0]:
-        stop_lbl = f"🛡️ L5 Stop: ≤{max_stop:g}% (Target {rr_ratio:g}R)" if gate_on else "⚪ L5 Risk: OFF"
+        exit_tag = "JLaw 50%+21EMA" if exit_model == "JLAW_HYBRID" else f"Fixed {rr_ratio:g}R"
+        stop_lbl = f"🛡️ L5: ≤{max_stop:g}% ({exit_tag})" if gate_on else "⚪ L5 Risk: OFF"
         with st.popover(stop_lbl, use_container_width=True):
-            st.markdown("**Capital Protection & Stop-Loss Clamp**")
-            st.caption("Minervini discipline: cut losses quickly and clamp maximum downside risk.")
+            st.markdown("**Capital Protection & JLaw Exit Model**")
+            st.caption("Minervini stop-loss clamp + JLaw Championship 50% scale-out & 21 EMA trailing runner.")
             l5["risk_gate_enabled"] = st.toggle("Enable Risk Gate", value=gate_on)
+            exit_choice = st.radio(
+                "Profit Exit Strategy",
+                options=[
+                    "🏆 JLaw Hybrid (50% @ +2.5R · Trail 50% on 21 EMA)",
+                    "🎯 Fixed Reward/Risk Target (100% @ +R Target)",
+                ],
+                index=0 if exit_model == "JLAW_HYBRID" else 1,
+            )
+            l5["exit_model"] = "JLAW_HYBRID" if exit_choice.startswith("🏆") else "FIXED_RR"
             l5["max_stop_loss_pct"] = st.slider(
                 "Max Allowable Stop-Loss (%)",
                 min_value=3.0,
@@ -43,12 +55,20 @@ def render_layer5_pills(l5: Dict[str, Any], l5_meta: Dict[str, Any] | None = Non
                 help="Eliminates setups where the logical stop exceeds this percentage.",
             )
             l5["min_reward_risk_ratio"] = st.slider(
-                "Target Reward-to-Risk (R-Multiple)",
+                "Partial / Full Target R-Multiple",
                 min_value=1.5,
                 max_value=4.5,
                 value=rr_ratio,
                 step=0.25,
-                help="Standard swing trading target is 2.5:1 or 3.0:1 reward-to-risk.",
+                help="JLaw scales out 50% of shares at +2.5R, raises stop to breakeven, and trails 50% on the 21 EMA.",
+            )
+            l5["earnings_guard_days"] = st.slider(
+                "⚠️ Earnings Binary Guard Window (Days)",
+                min_value=3,
+                max_value=21,
+                value=er_guard_days,
+                step=1,
+                help="Flags stocks reporting earnings within N days so you never hold a 0%-cushion trade into earnings.",
             )
 
     # 2. Pill: Account Equity & 1% Risk Rule

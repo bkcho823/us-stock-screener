@@ -46,6 +46,8 @@ def evaluate_layer5_position_sizing(
     max_stop_pct = float(layer5_cfg.get("max_stop_loss_pct", 7.0))
     rr_ratio = float(layer5_cfg.get("min_reward_risk_ratio", 2.5))
     max_alloc_pct = float(layer5_cfg.get("max_portfolio_allocation_pct", 25.0))
+    exit_model = str(layer5_cfg.get("exit_model", "JLAW_HYBRID")).upper()
+    er_guard_days = int(layer5_cfg.get("earnings_guard_days", 10))
 
     # Total dollar risk allowed on this trade
     max_dollar_risk = account_equity * (risk_pct_per_trade / 100.0)
@@ -58,20 +60,26 @@ def evaluate_layer5_position_sizing(
     target_prices = []
     target_gain_pcts = []
     shares_list = []
+    partial_shares_list = []
+    runner_trail_list = []
     pos_values = []
     alloc_pcts = []
     risk_badges = []
+    exit_plan_badges = []
+    earnings_badges = []
+    er_warning_count = 0
 
     for _, row in df.iterrows():
         close = float(row.get("close", 10.0))
         contraction = float(row.get("last_contraction_pct", 5.0))
-        ema20 = float(row.get("ema_20", close * 0.96))
+        # P0 Fix: Read exact JLaw ema_21 before falling back to ema_20
+        ema21 = float(row.get("ema_21", row.get("ema_20", close * 0.96)))
 
         # 1. Structural Stop: below contraction low
         struct_stop = close * (1.0 - (contraction * 0.85 / 100.0))
 
         # 2. EMA Stop: 1% below 21-day EMA (if below close)
-        ema_stop = ema20 * 0.99 if 0 < ema20 < close else struct_stop
+        ema_stop = ema21 * 0.99 if 0 < ema21 < close else struct_stop
 
         # Nearest logical support
         logical_stop = max(struct_stop, ema_stop)
@@ -92,7 +100,7 @@ def evaluate_layer5_position_sizing(
         risk_pct = round((risk_per_share / close) * 100.0, 2)
         risk_pcts.append(risk_pct)
 
-        # Target Price based on Reward/Risk ratio
+        # Target Price based on Reward/Risk ratio (+2.5R partial scale-out or full target)
         target_val = round(close + (rr_ratio * risk_per_share), 2)
         target_prices.append(target_val)
 
@@ -108,14 +116,36 @@ def evaluate_layer5_position_sizing(
         rec_shares = max(1, min(shares_risk, shares_cap))
         shares_list.append(rec_shares)
 
+        part_sh = max(1, rec_shares // 2)
+        partial_shares_list.append(part_sh)
+        runner_trail_list.append(round(ema21, 2))
+
         pos_val = round(rec_shares * close, 2)
         pos_values.append(pos_val)
 
         pos_alloc = round((pos_val / account_equity) * 100.0, 1) if account_equity > 0 else 0.0
         alloc_pcts.append(pos_alloc)
 
-        # Risk Badge
-        risk_badge = f"🛑 Stop ${stop_val:.2f} (-{risk_pct:.1f}%) · 🎯 ${target_val:.2f} (+{target_gain:.1f}%)"
+        # Earnings Guard Badge (P1)
+        er_days = int(row.get("days_to_earnings", 999))
+        if 0 <= er_days <= er_guard_days:
+            er_badge = f"⚠️ ER in {er_days}d (Need Cushion)"
+            er_warning_count += 1
+        elif 0 <= er_days < 999:
+            er_badge = f"✅ ER in {er_days}d"
+        else:
+            er_badge = "✅ Clear"
+        earnings_badges.append(er_badge)
+
+        # Exit Plan Badge (P1: JLaw Hybrid vs Fixed R/R)
+        if exit_model == "JLAW_HYBRID":
+            exit_badge = f"🏆 50% @ ${target_val:.2f} (+{rr_ratio:g}R) · 50% Trail 21EMA (${ema21:.2f})"
+            risk_badge = f"🛑 Stop ${stop_val:.2f} (-{risk_pct:.1f}%) · 🏆 50% @ ${target_val:.2f} + 21EMA Trail"
+        else:
+            exit_badge = f"🎯 100% @ ${target_val:.2f} (+{rr_ratio:g}R · +{target_gain:.1f}%)"
+            risk_badge = f"🛑 Stop ${stop_val:.2f} (-{risk_pct:.1f}%) · 🎯 ${target_val:.2f} (+{target_gain:.1f}%)"
+
+        exit_plan_badges.append(exit_badge)
         risk_badges.append(risk_badge)
 
     df["stop_loss_price"] = stop_prices
@@ -124,8 +154,12 @@ def evaluate_layer5_position_sizing(
     df["target_price"] = target_prices
     df["target_gain_pct"] = target_gain_pcts
     df["recommended_shares"] = shares_list
+    df["partial_shares"] = partial_shares_list
+    df["runner_trail_ema21"] = runner_trail_list
     df["position_value"] = pos_values
     df["portfolio_alloc_pct"] = alloc_pcts
+    df["exit_plan_badge"] = exit_plan_badges
+    df["earnings_badge"] = earnings_badges
     df["risk_badge"] = risk_badges
 
     # Gate Qualification: Stock qualifies if downside risk is within acceptable boundaries (<= max_stop_pct)
@@ -154,6 +188,9 @@ def evaluate_layer5_position_sizing(
         "min_reward_risk_ratio": rr_ratio,
         "max_portfolio_allocation_pct": max_alloc_pct,
         "max_capital_allocation": max_capital_allocation,
+        "exit_model": exit_model,
+        "earnings_guard_days": er_guard_days,
+        "er_warning_count": er_warning_count,
         "l5_qualified_count": l5_qual_cnt,
         "avg_risk_pct": avg_risk,
     }

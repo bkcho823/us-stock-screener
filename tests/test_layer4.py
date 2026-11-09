@@ -144,6 +144,30 @@ class TestLayer4Entry(unittest.TestCase):
         qual_tickers_deck = df_deck[df_deck["l4_qualified"]]["ticker"].tolist()
         self.assertEqual(qual_tickers_deck, ["DECK"])
 
+    def test_pre_breakout_coil_pivot_high_triggers_mid_base_vcp(self) -> None:
+        # Stock is 14% below 52W high ($110), breaking out past 10D coil pivot ($94.50) at $95.80 on 180% vol
+        df_coil = pd.DataFrame([
+            {
+                "ticker": "POWL",
+                "company_name": "Powell Industries",
+                "close": 95.80,
+                "high_52w": 110.00,
+                "prior_high_52w": 110.00,
+                "coil_pivot_high": 94.50,
+                "last_contraction_pct": 4.2,
+                "vol_1d": 1_800_000,
+                "vol_60d": 1_000_000,
+                "qualified_all": True,
+                "l2_qualified": True,
+                "l3_qualified": True,
+            }
+        ])
+        df_out, meta = evaluate_layer4_entry_signals(df_coil, {"min_vol_expansion_pct": 120.0, "max_buy_zone_pct": 3.5})
+        row = df_out.iloc[0]
+        self.assertEqual(row["pivot_price"], 94.50)
+        self.assertEqual(row["action_status"], "TRIGGERED")
+        self.assertEqual(meta["triggered_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
