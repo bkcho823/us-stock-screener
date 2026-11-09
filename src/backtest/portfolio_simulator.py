@@ -301,10 +301,10 @@ def run_monster_winner_recall_audit(
             min_mkt_cap_2024 = round(min(raw_mc_vals), 2)
             max_mkt_cap_2024 = round(max(raw_mc_vals), 2)
 
-        if max_bar_age < 200:
+        if max_bar_age < 200 and l3_days == 0 and l4_act_days == 0:
             diag = f"Recent IPO/Spin-off ({max_bar_age} bars < 200D SMA warmup)"
         elif l0_days == 0:
-            diag = f"Blocked at L0 (Mkt Cap ${min_mkt_cap_2024:.1f}B-${max_mkt_cap_2024:.1f}B < $3B or Dollar Vol < $50M)"
+            diag = f"Blocked at L0 (Mkt Cap ${min_mkt_cap_2024:.1f}B-${max_mkt_cap_2024:.1f}B < Floor or Dollar Vol)"
         elif l1_days == 0:
             top_miss = sorted(l1_miss_reasons.items(), key=lambda x: x[1], reverse=True)[:2]
             miss_str = ", ".join(f"{k}" for k, _ in top_miss)
@@ -316,7 +316,9 @@ def run_monster_winner_recall_audit(
         elif l4_act_days == 0:
             diag = "Passed L3 VCP, but >8% below 52W High (local pivot bug)"
         else:
-            if min_mkt_cap_2024 < 3.0 and l0_days < 180:
+            if max_bar_age < 200:
+                diag = f"✅ Caught via P2 IPO Stage 2 Mode ({max_bar_age} bars)"
+            elif min_mkt_cap_2024 < 3.0 and l0_days < 180:
                 diag = f"✅ Caught (Note: <$3B Mkt Cap early in 2024, min ${min_mkt_cap_2024:.2f}B)"
             else:
                 diag = "✅ Caught cleanly in Table 2"
@@ -374,7 +376,7 @@ def _select_ranked_table2_candidates(df_scored: pd.DataFrame, allowed_statuses: 
     status_rank_map = {"TRIGGERED": 0, "BUY_ZONE": 1, "ON_DECK": 2, "EXTENDED": 3, "BUILDING": 4}
     sub["_status_rank"] = sub["action_status"].map(status_rank_map).fillna(5)
     sub = sub.sort_values(
-        by=["_status_rank", "vcp_score", "composite_score", "rs_percentile"],
+        by=["_status_rank", "composite_score", "vcp_score", "rs_percentile"],
         ascending=[True, False, False, False],
     ).reset_index(drop=True)
     return sub

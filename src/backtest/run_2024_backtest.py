@@ -28,6 +28,7 @@ from src.backtest.portfolio_simulator import (
     run_monster_winner_recall_audit,
     run_walk_forward_simulation,
 )
+from src.config.builtin_presets import BUILTIN_PRESETS
 from src.config.settings import (
     get_default_layer0_config,
     get_default_layer1_config,
@@ -106,25 +107,34 @@ def main() -> None:
     dates_2024 = panel["trading_dates_2024"]
     print(f"         Built {len(dates_2024)} trading days in 2024 ({time.perf_counter() - t1:.1f}s)")
 
-    print("\n[Step 2] Running Production Pipeline across all 2024 trading days (Clean PIT vs As-Is Snapshot vs Pro)...")
+    print("\n[Step 2] Running Updated Production Pipeline (P0+P1+P2) across all 2024 trading days...")
     t2 = time.perf_counter()
     screens_pit_default = precompute_daily_screens(panel, feature_mode="pit_clean")
-    screens_asis_bug = precompute_daily_screens(panel, feature_mode="asis_live_snapshot")
 
-    # Pro configuration: lower L0 Market Cap floor from $3.0B -> $1.0B ($25M dollar vol) + Local 20D Swing High Pivot
-    pro_l0 = get_default_layer0_config()
-    pro_l0["min_market_cap_b"] = 1.0
-    pro_l0["min_dollar_vol_m"] = 25.0
-    pro_l0["min_vol_1d"] = 300_000
-    pro_l0["min_vol_10d"] = 300_000
-    pro_l0["min_vol_30d"] = 300_000
-    pro_l0["min_vol_60d"] = 300_000
-    pro_l0["min_vol_90d"] = 300_000
+    # Legacy pre-P0 baseline (for Before vs After comparison)
+    l1_legacy = get_default_layer1_config()
+    l1_legacy["ipo_mode_enabled"] = False
+    l3_legacy = get_default_layer3_config()
+    l3_legacy["min_adr_pct"] = 0.0
+    screens_asis_bug = precompute_daily_screens(
+        panel,
+        feature_mode="asis_live_snapshot",
+        layer1_cfg=l1_legacy,
+        layer3_cfg=l3_legacy,
+    )
+
+    # Built-in JLaw 2024 USIC Championship Preset from `src/config/builtin_presets.py`
+    jlaw_preset_key = "🏆 JLaw 2024 USIC Championship ($1B Cap + RS≥85 + ADR≥3.2% + Hybrid Exit)"
+    jlaw_preset = BUILTIN_PRESETS[jlaw_preset_key]
     screens_pro_1b = precompute_daily_screens(
         panel,
         feature_mode="pit_clean",
-        layer0_cfg=pro_l0,
-        use_local_20d_pivot=True,
+        layer0_cfg=jlaw_preset["layer0"],
+        layer1_cfg=jlaw_preset["layer1"],
+        layer2_cfg=jlaw_preset["layer2"],
+        layer3_cfg=jlaw_preset["layer3"],
+        layer4_cfg=jlaw_preset["layer4"],
+        layer5_cfg=jlaw_preset["layer5"],
     )
     print(f"         Completed 3x252 full 6-layer pipeline runs ({time.perf_counter() - t2:.1f}s)")
 

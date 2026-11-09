@@ -61,17 +61,17 @@ class TestBacktestEngine(unittest.TestCase):
         lead_df = pd.DataFrame(
             {
                 "Open": c * 0.998,
-                "High": c * 1.008,
-                "Low": c * 0.992,
+                "High": c * 1.015,
+                "Low": c * 0.985,
                 "Close": c,
                 "Volume": v,
             },
             index=dates,
         )
-        # Keep tight coil highs strictly <= 100.0 before b_idx
+        # Keep tight coil highs strictly <= 100.0 before b_idx with ~2.8% ADR
         for k in range(b_idx - 14, b_idx):
-            lead_df.iloc[k, lead_df.columns.get_loc("High")] = 99.5
-            lead_df.iloc[k, lead_df.columns.get_loc("Low")] = 97.5
+            lead_df.iloc[k, lead_df.columns.get_loc("High")] = 99.8
+            lead_df.iloc[k, lead_df.columns.get_loc("Low")] = 97.1
         lead_df.iloc[b_idx - 15, lead_df.columns.get_loc("High")] = 100.0
 
         # Laggard stock so pool has >1 stock & industry rankings

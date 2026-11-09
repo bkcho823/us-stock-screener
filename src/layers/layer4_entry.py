@@ -66,19 +66,14 @@ def evaluate_layer4_entry_signals(
         coil_high = float(row.get("coil_pivot_high", 0.0))
         contraction = float(row.get("last_contraction_pct", 6.0))
 
-        if coil_high > 0 and coil_high != high_52w:
-            # Enriched with exact 10-day pre-breakout swing high [T-10 : T-1]
-            if ref_52w > 0 and close >= ref_52w and ((ref_52w - coil_high) / ref_52w) <= 0.03:
-                pivot = round(ref_52w, 2)
-            else:
-                pivot = round(coil_high, 2)
-        elif ref_52w > 0 and close >= ref_52w:
+        if ref_52w > 0 and close >= ref_52w:
             # Breaking out at/above prior 52W high: pivot resistance is the prior 52W high level
             pivot = round(ref_52w, 2)
         elif ref_52w > 0 and ((ref_52w - close) / close) <= 0.08:
-            # Within 8% of 52W high: consolidation resistance is the 52W high
+            # Within 8% of 52W high: primary overhead resistance is the prior 52W high
             pivot = round(ref_52w, 2)
         elif coil_high > 0:
+            # Mid-base VCP (>8% below 52W high): resistance is the 10D pre-breakout consolidation swing high
             pivot = round(coil_high, 2)
         else:
             # Un-enriched fallback: if breaking out above SMA10 with a mid-base coil, anchor to SMA10; else 52W high

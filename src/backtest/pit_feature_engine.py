@@ -41,13 +41,23 @@ def build_sp500_pit_Lookup(sp500_df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     perf_6m = ((closes / closes.shift(126)) - 1.0) * 100.0
     perf_12m = ((closes / closes.shift(252)) - 1.0) * 100.0
 
+    ema21_lag5 = ema21.shift(5)
     lookup: Dict[str, Dict[str, Any]] = {}
     for dt, row in df.iterrows():
         d_str = pd.Timestamp(dt).strftime("%Y-%m-%d")
         c_val = float(row["Close"])
         e21_val = float(ema21.loc[dt]) if not np.isnan(ema21.loc[dt]) else c_val
+        e21_prev5 = float(ema21_lag5.loc[dt]) if not np.isnan(ema21_lag5.loc[dt]) else e21_val
         s50_val = float(sma50.loc[dt]) if not np.isnan(sma50.loc[dt]) else c_val
         s200_val = float(sma200.loc[dt]) if not np.isnan(sma200.loc[dt]) else c_val
+        e21_rising = bool(e21_val >= e21_prev5)
+
+        if c_val >= e21_val and c_val >= s50_val and e21_rising:
+            m_regime = "GREEN_POWER_TREND"
+        elif c_val >= s50_val:
+            m_regime = "YELLOW_PULLBACK"
+        else:
+            m_regime = "RED_DEFENSIVE"
 
         lookup[d_str] = {
             "symbol": "^GSPC",
@@ -57,12 +67,14 @@ def build_sp500_pit_Lookup(sp500_df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
             "high": round(float(row["High"]), 2),
             "low": round(float(row["Low"]), 2),
             "ema_21": round(e21_val, 2),
+            "ema_21_rising": e21_rising,
             "sma_20": round(float(sma20.loc[dt]) if not np.isnan(sma20.loc[dt]) else c_val, 2),
             "sma_50": round(s50_val, 2),
             "sma_200": round(s200_val, 2),
             "above_ema21": bool(c_val >= e21_val),
             "above_sma50": bool(c_val >= s50_val),
             "above_sma200": bool(c_val >= s200_val),
+            "market_regime": m_regime,
             "perf_1m_pct": round(float(perf_1m.loc[dt]) if not np.isnan(perf_1m.loc[dt]) else 0.0, 2),
             "perf_3m_pct": round(float(perf_3m.loc[dt]) if not np.isnan(perf_3m.loc[dt]) else 0.0, 2),
             "perf_6m_pct": round(float(perf_6m.loc[dt]) if not np.isnan(perf_6m.loc[dt]) else 0.0, 2),
@@ -144,14 +156,15 @@ def build_pit_panel(
             + 0.20 * perf_12m.fillna(0.0)
         )
 
-        # --- Clean Point-in-Time (Pre-Day-T) VCP & Pivot Features ---
+        # --- Clean Point-in-Time (Pre-Day-T) VCP, Coil Pivot & ADR(20) Features (P0 + P1 + P2) ---
         h_prev = h.shift(1)
         l_prev = l.shift(1)
         c_prev = c.shift(1)
 
-        high_52w_pit = h_prev.rolling(252, min_periods=50).max().fillna(h)
-        low_52w_pit = l_prev.rolling(252, min_periods=50).min().fillna(l)
+        high_52w_pit = h_prev.rolling(252, min_periods=35).max().fillna(h)
+        low_52w_pit = l_prev.rolling(252, min_periods=35).min().fillna(l)
         swing_high_20d_pit = h_prev.rolling(20, min_periods=8).max().fillna(high_52w_pit)
+        coil_pivot_high_pit = h_prev.rolling(10, min_periods=5).max().fillna(high_52w_pit)
 
         coil_hi_pit = c_prev.rolling(10, min_periods=5).max()
         coil_lo_pit = c_prev.rolling(10, min_periods=5).min()
@@ -160,9 +173,13 @@ def build_pit_panel(
         vol_coil_med_pit = v_prev.rolling(5, min_periods=3).median()
         vol_dryup_pit = ((vol_coil_med_pit / vol_60d.replace(0, np.nan)) * 100.0).clip(10.0, 200.0).fillna(80.0)
 
-        # --- As-Is Live Snapshot Features (includes Day T bar) ---
-        high_52w_asis = h.rolling(252, min_periods=50).max()
-        low_52w_asis = l.rolling(252, min_periods=50).min()
+        # P1: 20-Day Average Daily Range %: mean((High - Low) / Low * 100) over [T-20 : T-1]
+        daily_range_pct_prev = ((h_prev - l_prev) / l_prev.replace(0, np.nan)) * 100.0
+        adr_20_pct = daily_range_pct_prev.rolling(20, min_periods=5).mean().clip(0.5, 25.0).fillna(3.0)
+
+        # --- Legacy Pre-Fix Live Snapshot Features (includes Day T bar in coil & dryup) ---
+        high_52w_asis = h.rolling(252, min_periods=35).max()
+        low_52w_asis = l.rolling(252, min_periods=35).min()
         coil_hi_asis = c.rolling(10, min_periods=5).max()
         coil_lo_asis = c.rolling(10, min_periods=5).min()
         contraction_asis = (((coil_hi_asis - coil_lo_asis) / coil_hi_asis.replace(0, np.nan)) * 100.0).clip(1.0, 40.0).fillna(10.0)
@@ -181,6 +198,7 @@ def build_pit_panel(
                 "is_etf_or_fund": bool(meta.get("is_etf_or_fund", False)),
                 "is_adr": bool(meta.get("is_adr", False)),
                 "bar_age": bar_age,
+                "bars_count": bar_age,
                 "open": o.round(2),
                 "high": h.round(2),
                 "low": l.round(2),
@@ -214,9 +232,11 @@ def build_pit_panel(
                 "perf_9m": perf_9m.round(2),
                 "perf_12m": perf_12m.round(2),
                 "rs_raw_score": rs_raw_score.round(2),
+                "adr_20_pct": adr_20_pct.round(2),
                 "high_52w_pit": high_52w_pit.round(2),
                 "low_52w_pit": low_52w_pit.round(2),
                 "swing_high_20d_pit": swing_high_20d_pit.round(2),
+                "coil_pivot_high_pit": coil_pivot_high_pit.round(2),
                 "contraction_pit": contraction_pit.round(2),
                 "vol_dryup_pit": vol_dryup_pit.round(1),
                 "high_52w_asis": high_52w_asis.round(2),
@@ -276,12 +296,18 @@ def extract_day_universe(
 
     df = base_df.copy()
     if feature_mode == "asis_live_snapshot":
+        # Reproduces legacy pre-P0 behavior (where Day T was included in coil & dryup, and coil_pivot_high was absent)
         df["high_52w"] = df["high_52w_asis"]
+        df["prior_high_52w"] = df["high_52w_asis"]
+        df["coil_pivot_high"] = 0.0
         df["low_52w"] = df["low_52w_asis"]
         df["last_contraction_pct"] = df["contraction_asis"]
         df["vol_dryup_pct"] = df["vol_dryup_asis"]
     else:
+        # Updated Production P0/P1/P2 behavior: pre-breakout [T-10:T-1] coil_pivot_high, prior_high_52w, contraction, dryup
         df["high_52w"] = df["high_52w_pit"]
+        df["prior_high_52w"] = df["high_52w_pit"]
+        df["coil_pivot_high"] = df["coil_pivot_high_pit"]
         df["low_52w"] = df["low_52w_pit"]
         df["last_contraction_pct"] = df["contraction_pit"]
         df["vol_dryup_pct"] = df["vol_dryup_pit"]
