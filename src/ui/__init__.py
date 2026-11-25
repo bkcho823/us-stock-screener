@@ -16,7 +16,15 @@ from src.ui.pills.layer3_pills import render_layer3_pills
 from src.ui.pills.layer4_pills import render_layer4_pills
 from src.ui.pills.layer5_pills import render_layer5_pills
 from src.ui.bottleneck_strip import render_bottleneck_strip
-from src.ui.watchlist_grid import render_watchlist_grid
+from src.ui.watchlist_grid import (
+    render_watchlist_grid,
+    render_layer0_tab_results,
+    render_layer1_tab_results,
+    render_layer2_tab_results,
+    render_layer3_tab_results_with_chart,
+    render_layer4_tab_results,
+    render_layer5_tab_results,
+)
 from src.ui.tradingview_cockpit import render_tradingview_cockpit
 
 __all__ = [
@@ -33,5 +41,11 @@ __all__ = [
     "render_layer5_pills",
     "render_bottleneck_strip",
     "render_watchlist_grid",
+    "render_layer0_tab_results",
+    "render_layer1_tab_results",
+    "render_layer2_tab_results",
+    "render_layer3_tab_results_with_chart",
+    "render_layer4_tab_results",
+    "render_layer5_tab_results",
     "render_tradingview_cockpit",
 ]

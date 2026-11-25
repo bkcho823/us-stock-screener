@@ -83,6 +83,17 @@ def apply_custom_theme() -> None:
             color: #94a3b8;
             text-decoration: line-through;
         }
+        /* Style Layer Navigation Tabs (Layer 0 -> Layer 5) */
+        div[data-testid="stTabs"] button[data-baseweb="tab"] {
+            font-size: 0.88rem !important;
+            font-weight: 700 !important;
+            padding: 0.5rem 1.05rem !important;
+            border-radius: 8px 8px 0 0 !important;
+        }
+        div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
+            background-color: rgba(56, 189, 248, 0.14) !important;
+            color: #38bdf8 !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
