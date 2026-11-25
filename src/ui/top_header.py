@@ -54,13 +54,24 @@ def render_top_header(sp500_bm: Dict[str, Any]) -> None:
             reg_pill_lbl = f"🔴 Regime: DEFENSIVE ({bm_dist21:+.1f}%)"
 
         with st.popover(reg_pill_lbl, use_container_width=True):
-            st.markdown(f"**🚦 JLaw Market Regime Traffic Light ({bm_sym})**")
+            st.markdown(f"**🚦 JLaw Multi-Index Market Regime Traffic Light ({bm_sym})**")
             st.write(f"• **Status:** {sp500_bm.get('regime_badge', reg_pill_lbl)}")
             st.write(f"• **{bm_sym} Close:** `{bm_close:,.2f}` vs **21 EMA:** `{bm_ema21:,.2f}` (`{bm_dist21:+.2f}%`)")
             st.write(f"• **50 SMA:** `{bm_sma50:,.2f}` · **1M / 6M Perf:** `{sp500_bm.get('perf_1m_pct', 0):+.2f}%` / `{sp500_bm.get('perf_6m_pct', 0):+.2f}%`")
+            bms = sp500_bm.get("benchmarks", {})
+            if isinstance(bms, dict) and len(bms) > 1:
+                st.markdown("**📊 Multi-Index Breadth (`SPY` · `QQQ` · `IWM`):**")
+                for b_k in ["SPY", "QQQ", "IWM"]:
+                    if b_k in bms:
+                        bi = bms[b_k]
+                        st_icon = "🟢 >21EMA" if bi.get("above_ema21", True) else "🔴 <21EMA"
+                        st.caption(
+                            f"• **{bi.get('name', b_k)}:** `{bi.get('last_close', 0):,.2f}` ({st_icon}) · "
+                            f"1M `{bi.get('perf_1m_pct', 0):+.2f}%` · 6M `{bi.get('perf_6m_pct', 0):+.2f}%`"
+                        )
             st.info(f"🎯 **Progressive Exposure Guidance:** {rec_exp}")
             st.caption(
-                "JLaw USIC Rule: Press full size & pyramid only when S&P 500 / QQQ is above a rising 21 EMA and recent breakouts hold gains."
+                "JLaw USIC Rule: Press full size & pyramid only when S&P 500 / QQQ / IWM are above rising 21 EMAs and recent breakouts hold gains."
             )
 
     with top_c3:

@@ -42,10 +42,19 @@ def render_layer1_pills(l1: Dict[str, Any], sp500_bm: Dict[str, Any]) -> None:
             l1["c1_enabled"] = st.toggle("Enable C1: Price > SMA 150 & SMA 200", value=bool(l1.get("c1_enabled", True)))
             st.markdown("---")
             l1["ipo_mode_enabled"] = st.toggle(
-                "🚀 Enable IPO Lifecycle Mode (<200D Bars)",
+                "🚀 Enable Two-Tier IPO Mode (10–199D Bars)",
                 value=ipo_on,
-                help="Allows recent IPOs & spin-offs (<200 trading bars, e.g. RDDT, GEV) to pass C1–C4 using JLaw's IPO Stage 2 stack (Close > EMA21 > SMA50).",
+                help="Captures both Young IPO Primary Bases (10–49 trading bars via Close > SMA10 >= EMA21) and Mature IPO Stage 2 Bases (50–199 bars via Close > EMA21 > SMA50).",
             )
+            if l1["ipo_mode_enabled"]:
+                l1["ipo_min_bars"] = st.slider(
+                    "Min Trading Bars Since IPO",
+                    min_value=5,
+                    max_value=50,
+                    value=int(l1.get("ipo_min_bars", 10)),
+                    step=5,
+                    help="O'Neil & Minervini Primary IPO Base rule: 10 bars (2 trading weeks) minimum to form a valid post-IPO consolidation.",
+                )
     with l1_r1[1]:
         p_c2 = "✅ C2: SMA150 > 200" if l1["c2_enabled"] else "⚪ C2: SMA150 > 200"
         with st.popover(p_c2, use_container_width=True):
@@ -113,9 +122,17 @@ def render_layer1_pills(l1: Dict[str, Any], sp500_bm: Dict[str, Any]) -> None:
         with st.popover(p_c10, use_container_width=True):
             l1["c10_enabled"] = st.toggle("Enable C10: 1-Month Performance Filter", value=bool(l1.get("c10_enabled", True)))
             l1["c10_use_dynamic_sp500"] = st.toggle(
-                f"Dynamic vs S&P 500 1M ({sp_1m:+.2f}%)",
+                f"Dynamic vs Benchmark 1M ({sp_1m:+.2f}%)",
                 value=bool(l1.get("c10_use_dynamic_sp500", True)),
-                help="2.0x S&P 500 when positive; 0.5x when negative.",
+                help="2.0x Benchmark when positive; 0.5x when negative.",
+            )
+            bm_opts = ["SPY", "QQQ", "IWM", "COMPOSITE"]
+            cur_bm = str(l1.get("benchmark_index", "SPY")).upper()
+            l1["benchmark_index"] = st.selectbox(
+                "Benchmark Index (C10 & C11)",
+                options=bm_opts,
+                index=bm_opts.index(cur_bm) if cur_bm in bm_opts else 0,
+                help="Compare stock 1M/6M performance against S&P 500 (SPY), Nasdaq 100 (QQQ), Russell 2000 (IWM), or Composite.",
             )
             if not l1["c10_use_dynamic_sp500"]:
                 l1["c10_manual_min_pct"] = st.number_input(

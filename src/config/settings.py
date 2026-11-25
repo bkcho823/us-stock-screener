@@ -75,16 +75,19 @@ def get_default_layer1_config() -> Dict[str, Any]:
         "c11_pos_multiplier": 2.0,
         "c11_neg_multiplier": 0.5,
         "c11_manual_min_pct": 24.0,
-        "ipo_mode_enabled": True,         # P2: Allow <200-bar IPO/Spin-off bases (RDDT, GEV) via Close > EMA21 > SMA50
+        "ipo_mode_enabled": True,         # P2: Allow <200-bar IPO/Spin-off bases (RDDT, ALAB, GEV)
+        "ipo_min_bars": 10,               # Q1 Expert Upgrade: Capture young IPO Primary Bases from Day 10+ (10-199 bars)
+        "benchmark_index": "SPY",         # Q4 Expert Upgrade: "SPY" (S&P 500), "QQQ" (Nasdaq 100), "IWM" (Russell 2000), or "COMPOSITE"
     }
 
 
 def get_default_layer2_config() -> Dict[str, Any]:
     """
-    Default Layer 2 Momentum & Industry Leadership Template (Expert Panel Consensus):
+    Default Layer 2 Momentum, Industry Leadership & CAN SLIM Fundamental Template (Expert Panel Consensus):
     - Industry Group Gate: Keep stocks in Top X% of Industry Groups (default: Top 40%, group RS >= 60)
     - Lone Wolf Leader Override: If individual RS >= 90, exempt from industry gate
-    - Composite Score Weights: 50% Stock RS + 35% Industry Group RS + 15% In-Group Leadership Rank
+    - Fundamental Growth Gate (Q3 CAN SLIM): Optional EPS/Sales YoY >= 20% (with RS >= 90 Turnaround Override)
+    - Composite Score Weights: 50% Stock RS + 35% Industry Group RS + 15% In-Group Leadership Rank (+ Fundamental Tie-Breaker)
     """
     return {
         "l2_enabled": True,
@@ -95,6 +98,9 @@ def get_default_layer2_config() -> Dict[str, Any]:
         "weight_stock_rs": 0.50,          # 50%
         "weight_group_rs": 0.35,          # 35%
         "weight_lead_rank": 0.15,         # 15%
+        "fund_gate_enabled": False,       # Q3: Optional strict CAN SLIM gate (EPS >= 20% or Rev >= 20% or RS >= 90)
+        "min_eps_growth_yoy": 20.0,       # CAN SLIM 'C': >= 20% YoY EPS growth
+        "min_rev_growth_yoy": 20.0,       # CAN SLIM Sales: >= 20% YoY Revenue growth
     }
 
 
@@ -106,6 +112,7 @@ def get_default_layer3_config() -> Dict[str, Any]:
     - Max Volume Dry-up Ratio: <= 65.0% of 50-day average volume (institutional supply exhaustion)
     - Min ADR% (20D Average Daily Range): >= 2.5% (P1: filters out sleepy low-beta REITs/Utilities/Banks)
     - JLaw EMA Alignment: Close > 21EMA and 21EMA > 50EMA
+    - News Shock & Institutional Distribution Guard (Q2): Rejects stocks with recent heavy-volume distribution/gap-down shocks
     """
     return {
         "l3_enabled": True,
@@ -115,6 +122,7 @@ def get_default_layer3_config() -> Dict[str, Any]:
         "max_vol_dryup_pct": 65.0,        # Pre-breakout coil volume <= 65% of 50D/60D avg
         "min_tightness_score": 60.0,      # VCP Tightness Score >= 60
         "min_adr_pct": 2.5,               # Minimum 20-day Average Daily Range (%) to prevent low-beta crowding
+        "news_shock_guard_enabled": True, # Q2 Expert Upgrade: Filter out recent abnormal high-volume distribution shocks
     }
 
 
@@ -125,6 +133,8 @@ def get_default_layer4_config() -> Dict[str, Any]:
     - Min Volume Surge: >= 120.0% of 50-day average volume for confirmed breakouts
     - Max Buy Zone Distance: <= 3.5% above pivot high (Minervini low-risk buy zone)
     - On Deck Distance: Within 3.0% below pivot high (-3.0% to 0.0%)
+    - Use Handle / 10D Coil Pivot (Q5): Prioritizes tight 10D VCP handle pivot over distant 52W high
+    - Price-First Adaptive Volume (Q6): Allows 0.85x volume threshold when A+ price coil is ultra-tight (<=5.5%)
     - Action Status Filter: "ALL" (ALL, TRIGGERED_ONLY, BUY_ZONE_ONLY, ON_DECK_ONLY)
     """
     return {
@@ -133,6 +143,8 @@ def get_default_layer4_config() -> Dict[str, Any]:
         "min_vol_expansion_pct": 120.0,
         "max_buy_zone_pct": 3.5,
         "on_deck_pct": 3.0,
+        "use_handle_coil_pivot": False,       # Q5 Option: Default False (52W High within 8%, 10D Coil High when >8% below 52W High)
+        "adaptive_vol_for_tight_coil": False, # Q6 Option: Optional 0.85x volume threshold for ultra-tight coils
         "action_status_filter": "ALL",
     }
 

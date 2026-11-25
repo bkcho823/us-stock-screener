@@ -70,44 +70,64 @@ def evaluate_layer1_conditions(
         df["rs_percentile"] = 99
 
     ipo_mode = bool(layer1_cfg.get("ipo_mode_enabled", True))
-    ema21_col = df.get("ema_21", df.get("ema_20", df.get("sma_20", df["close"])))
-    sma20_col = df.get("sma_20", ema21_col)
-    bars_col = df.get("bars_count", pd.Series(252, index=df.index))
-    is_ipo_stock = (df["sma_200"].isna() | (df["sma_200"] <= 0) | (bars_col < 200)) & (df["sma_50"] > 0)
-    df["is_ipo_stage2"] = ipo_mode & is_ipo_stock
+    ipo_min_bars = int(layer1_cfg.get("ipo_min_bars", 10))
+    ema21_col = df.get("ema_21", df.get("ema_20", df.get("sma_20", df["close"]))).fillna(df["close"])
+    sma20_col = df.get("sma_20", ema21_col).fillna(ema21_col)
+    sma10_col = df.get("sma_10", sma20_col).fillna(df["close"])
+    sma50_col = df.get("sma_50", pd.Series(np.nan, index=df.index))
+    bars_col = df.get("bars_count", pd.Series(252, index=df.index)).fillna(252)
 
-    # C1: Close > SMA150 and Close > SMA200 (IPO fallback: Close > EMA21 & Close > SMA50)
+    # Q1 Expert Upgrade: Two-Tier IPO Mode
+    # - Mature IPO Stage 2 (50-199 bars): Close > EMA21 > SMA50
+    # - Young IPO Primary Base (10-49 bars): Close > SMA10 >= EMA21/SMA20
+    has_sma50 = sma50_col.notna() & (sma50_col > 0)
+    has_sma10 = sma10_col.notna() & (sma10_col > 0)
+    is_mature_ipo = (df["sma_200"].isna() | (df["sma_200"] <= 0) | (bars_col < 200)) & has_sma50
+    is_young_ipo = (bars_col >= ipo_min_bars) & (bars_col < 50) & (~has_sma50) & has_sma10
+    df["is_young_ipo_base"] = ipo_mode & is_young_ipo
+    df["is_ipo_stage2"] = ipo_mode & (is_mature_ipo | is_young_ipo)
+
+    # C1: Close > SMA150 and Close > SMA200 (IPO fallback: Close > EMA21 & SMA50, or Close > SMA10 & EMA21 for 10-49D IPO)
     c1_std = (df["close"] > df["sma_150"]) & (df["close"] > df["sma_200"])
-    c1_ipo = (df["close"] > ema21_col) & (df["close"] > df["sma_50"])
+    c1_ipo = np.where(
+        df["is_young_ipo_base"],
+        (df["close"] > sma10_col) & (df["close"] >= ema21_col),
+        (df["close"] > ema21_col) & (df["close"] > sma50_col),
+    )
     df["c1_pass"] = np.where(df["is_ipo_stage2"], c1_ipo, c1_std)
 
-    # C2: SMA150 > SMA200 (IPO fallback: EMA21 > SMA50)
+    # C2: SMA150 > SMA200 (IPO fallback: EMA21 > SMA50, or SMA10 >= EMA21 for 10-49D IPO)
     c2_std = df["sma_150"] > df["sma_200"]
-    c2_ipo = ema21_col > df["sma_50"]
+    c2_ipo = np.where(df["is_young_ipo_base"], sma10_col >= ema21_col, ema21_col > sma50_col)
     df["c2_pass"] = np.where(df["is_ipo_stage2"], c2_ipo, c2_std)
 
-    # C3: SMA200 trending upward over N lookback trading days (IPO fallback: EMA21 >= SMA20)
+    # C3: SMA200 trending upward over N lookback trading days (IPO fallback: EMA21 >= SMA20 or SMA10 >= SMA20)
     lookback_n = int(layer1_cfg.get("c3_lookback_days", 20))
     lag_col = _pick_nearest_lag_column(lookback_n)
     if lag_col not in df.columns:
         lag_col = "sma_200_lag_20"
     df["sma_200_lookback_val"] = df[lag_col]
     c3_std = df["sma_200"] > df["sma_200_lookback_val"]
-    c3_ipo = ema21_col >= sma20_col
+    c3_ipo = np.where(df["is_young_ipo_base"], sma10_col >= sma20_col, ema21_col >= sma20_col)
     df["c3_pass"] = np.where(df["is_ipo_stage2"], c3_ipo, c3_std)
 
-    # C4: SMA50 > SMA150 > SMA200 (IPO fallback: Close > EMA21 > SMA50)
+    # C4: SMA50 > SMA150 > SMA200 (IPO fallback: Close > EMA21 > SMA50, or Close > SMA10 >= EMA21 for 10-49D IPO)
     c4_std = (df["sma_50"] > df["sma_150"]) & (df["sma_150"] > df["sma_200"])
-    c4_ipo = (df["close"] > ema21_col) & (ema21_col > df["sma_50"])
+    c4_ipo = np.where(
+        df["is_young_ipo_base"],
+        (df["close"] > sma10_col) & (sma10_col >= ema21_col),
+        (df["close"] > ema21_col) & (ema21_col > sma50_col),
+    )
     df["c4_pass"] = np.where(df["is_ipo_stage2"], c4_ipo, c4_std)
 
-    # C5: Close > SMA50
-    df["c5_pass"] = df["close"] > df["sma_50"]
+    # C5: Close > SMA50 (Young 10-49D IPO fallback: Close > SMA10 & EMA21)
+    df["c5_pass"] = np.where(df["is_young_ipo_base"], (df["close"] > sma10_col) & (df["close"] >= ema21_col), df["close"] > df["sma_50"])
 
-    # C6: Close >= 52W Low * (1 + X%)
+    # C6: Close >= 52W Low * (1 + X%) (Young 10-49D IPO Primary Base requires >= min(15%, X%) above post-IPO low)
     min_above_low_pct = float(layer1_cfg.get("c6_min_pct_above_52w_low", 30.0))
     df["pct_above_52w_low"] = (((df["close"] / df["low_52w"]) - 1.0) * 100.0).round(2)
-    df["c6_pass"] = df["pct_above_52w_low"] >= min_above_low_pct
+    req_c6 = np.where(df["is_young_ipo_base"], min(15.0, min_above_low_pct), min_above_low_pct)
+    df["c6_pass"] = df["pct_above_52w_low"] >= req_c6
 
     # C7: Close >= 52W High * (1 - Y%)
     max_below_high_pct = float(layer1_cfg.get("c7_max_pct_below_52w_high", 25.0))
@@ -122,10 +142,15 @@ def evaluate_layer1_conditions(
     df["c8_pass"] = df["rs_percentile"] >= min_rs
 
     # C9: Short-term MA alignment: SMA10 >= SMA20
-    df["c9_pass"] = df["sma_10"] >= df["sma_20"]
+    df["c9_pass"] = sma10_col >= sma20_col
 
-    # C10: 1M Perf > Dynamic S&P 500 1M threshold (2x when S&P >= 0, 0.5x when S&P < 0)
-    sp500_1m = float((sp500_benchmark or {}).get("perf_1m_pct", 0.0))
+    # Q4 Expert Upgrade: Select Benchmark Index (SPY, QQQ, IWM, or COMPOSITE) for C10 & C11
+    bm_choice = str(layer1_cfg.get("benchmark_index", "SPY")).upper()
+    bm_dict = (sp500_benchmark or {}).get("benchmarks", {})
+    active_bm = bm_dict.get(bm_choice, sp500_benchmark or {}) if isinstance(bm_dict, dict) and bm_choice in bm_dict else (sp500_benchmark or {})
+
+    # C10: 1M Perf > Dynamic Benchmark 1M threshold (2x when >= 0, 0.5x when < 0)
+    sp500_1m = float(active_bm.get("perf_1m_pct", (sp500_benchmark or {}).get("perf_1m_pct", 0.0)))
     y_1m_thresh = compute_dynamic_sp500_threshold(
         sp500_return_pct=sp500_1m,
         use_dynamic=bool(layer1_cfg.get("c10_use_dynamic_sp500", True)),
@@ -133,10 +158,15 @@ def evaluate_layer1_conditions(
         neg_mult=float(layer1_cfg.get("c10_neg_multiplier", 0.5)),
         manual_pct=float(layer1_cfg.get("c10_manual_min_pct", 7.0)),
     )
-    df["c10_pass"] = df["perf_1m"].fillna(-999.0) > y_1m_thresh
+    perf_1m_eff = np.where(
+        df["is_young_ipo_base"] & df["perf_1m"].isna(),
+        df["pct_above_52w_low"].fillna(0.0),
+        df["perf_1m"].fillna(-999.0),
+    )
+    df["c10_pass"] = perf_1m_eff > y_1m_thresh
 
-    # C11: 6M Perf > Dynamic S&P 500 6M threshold (2x when S&P >= 0, 0.5x when S&P < 0)
-    sp500_6m = float((sp500_benchmark or {}).get("perf_6m_pct", 0.0))
+    # C11: 6M Perf > Dynamic Benchmark 6M threshold (2x when >= 0, 0.5x when < 0)
+    sp500_6m = float(active_bm.get("perf_6m_pct", (sp500_benchmark or {}).get("perf_6m_pct", 0.0)))
     y_6m_thresh = compute_dynamic_sp500_threshold(
         sp500_return_pct=sp500_6m,
         use_dynamic=bool(layer1_cfg.get("c11_use_dynamic_sp500", True)),
@@ -144,9 +174,10 @@ def evaluate_layer1_conditions(
         neg_mult=float(layer1_cfg.get("c11_neg_multiplier", 0.5)),
         manual_pct=float(layer1_cfg.get("c11_manual_min_pct", 24.0)),
     )
+    perf_3m_or_1m = df.get("perf_3m", df["perf_1m"]).fillna(pd.Series(perf_1m_eff, index=df.index))
     perf_6m_eff = np.where(
         df["is_ipo_stage2"] & df["perf_6m"].isna(),
-        df.get("perf_3m", df.get("perf_1m", pd.Series(-999.0, index=df.index))).fillna(-999.0),
+        perf_3m_or_1m,
         df["perf_6m"].fillna(-999.0),
     )
     df["c11_pass"] = perf_6m_eff > y_6m_thresh
@@ -191,6 +222,8 @@ def evaluate_layer1_conditions(
             return "⚪ No Active Rules"
         missed = [SHORT_DIAGNOSTIC_LABELS[cid] for cid in active_ids if not row[f"{cid}_pass"]]
         if not missed:
+            if row.get("is_young_ipo_base", False):
+                return f"🌱 IPO Primary Base ({len(active_ids)}/{len(active_ids)})"
             if row.get("is_ipo_stage2", False):
                 return f"🚀 IPO Stage 2 ({len(active_ids)}/{len(active_ids)})"
             return f"✅ All {len(active_ids)} Passed"

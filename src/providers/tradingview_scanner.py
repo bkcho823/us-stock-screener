@@ -47,6 +47,9 @@ TV_COLUMNS = [
     "sector",                       # Sector name
     "industry",                     # Industry name
     "earnings_release_next_date",   # Next Earnings Release Timestamp (Unix sec, optional)
+    "earnings_per_share_diluted_yoy_growth_ttm",  # Q3 CAN SLIM: YoY Diluted EPS Growth (%)
+    "total_revenue_yoy_growth_ttm",               # Q3 CAN SLIM: YoY Revenue/Sales Growth (%)
+    "return_on_equity",                           # Q3 CAN SLIM: Return on Equity (%)
 ]
 
 
@@ -119,6 +122,9 @@ def fetch_tradingview_baseline_universe(
             "Perf.6M": "perf_6m",
             "Perf.Y": "perf_12m",
             "earnings_release_next_date": "next_earnings_ts",
+            "earnings_per_share_diluted_yoy_growth_ttm": "eps_growth_yoy",
+            "total_revenue_yoy_growth_ttm": "rev_growth_yoy",
+            "return_on_equity": "roe_pct",
         }
     )
 
@@ -126,6 +132,7 @@ def fetch_tradingview_baseline_universe(
         "close", "vol_1d", "vol_10d", "vol_30d", "vol_60d", "vol_90d",
         "dollar_vol", "market_cap", "sma_10", "sma_20", "ema_20", "sma_50", "ema_50", "sma_100",
         "sma_200", "high_52w", "low_52w", "volatility_d", "perf_1m", "perf_3m", "perf_6m", "perf_12m",
+        "eps_growth_yoy", "rev_growth_yoy", "roe_pct",
     ]
     for c in num_cols:
         if c in df.columns:

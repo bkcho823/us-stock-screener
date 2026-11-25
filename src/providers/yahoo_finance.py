@@ -122,6 +122,66 @@ def fetch_sp500_benchmark() -> Dict[str, Any]:
             result["regime_badge"] = f"🔴 DEFENSIVE / CHOP ({result['symbol']} < 21EMA & 50SMA)"
             result["recommended_exposure_str"] = "Capital Preservation (0.25% Pilot or Cash)"
 
+    # Q4 Expert Upgrade: Also fetch QQQ (Nasdaq 100) and IWM (Russell 2000) for Multi-Index Breadth & Benchmark Selection
+    benchmarks_map: Dict[str, Dict[str, Any]] = {
+        "SPY": {
+            "symbol": result["symbol"],
+            "name": "S&P 500 (SPY)",
+            "last_close": result["last_close"],
+            "ema_21": result["ema_21"],
+            "sma_50": result["sma_50"],
+            "dist_to_ema21_pct": result["dist_to_ema21_pct"],
+            "above_ema21": bool(result["last_close"] >= result["ema_21"]) if result["ema_21"] > 0 else True,
+            "perf_1m_pct": result["perf_1m_pct"],
+            "perf_3m_pct": result["perf_3m_pct"],
+            "perf_6m_pct": result["perf_6m_pct"],
+            "perf_12m_pct": result["perf_12m_pct"],
+        }
+    }
+    for idx_key, idx_sym, idx_label in [("QQQ", "QQQ", "Nasdaq 100 (QQQ)"), ("IWM", "IWM", "Russell 2000 (IWM)")]:
+        try:
+            ih = yf.Ticker(idx_sym).history(period="1y", interval="1d", auto_adjust=True)
+            if ih is not None and len(ih) >= 60:
+                ic = ih["Close"].dropna()
+                icurr = float(ic.iloc[-1])
+                ic1m = float(ic.iloc[-22]) if len(ic) >= 22 else float(ic.iloc[0])
+                ic3m = float(ic.iloc[-64]) if len(ic) >= 64 else float(ic.iloc[0])
+                ic6m = float(ic.iloc[-127]) if len(ic) >= 127 else float(ic.iloc[0])
+                ic12m = float(ic.iloc[0])
+                ie21 = float(ic.ewm(span=21, adjust=False).mean().iloc[-1])
+                is50 = float(ic.rolling(50, min_periods=20).mean().iloc[-1])
+                benchmarks_map[idx_key] = {
+                    "symbol": idx_sym,
+                    "name": idx_label,
+                    "last_close": round(icurr, 2),
+                    "ema_21": round(ie21, 2),
+                    "sma_50": round(is50, 2),
+                    "dist_to_ema21_pct": round(((icurr - ie21) / ie21) * 100.0, 2) if ie21 > 0 else 0.0,
+                    "above_ema21": bool(icurr >= ie21),
+                    "perf_1m_pct": round(((icurr / ic1m) - 1.0) * 100.0, 2),
+                    "perf_3m_pct": round(((icurr / ic3m) - 1.0) * 100.0, 2),
+                    "perf_6m_pct": round(((icurr / ic6m) - 1.0) * 100.0, 2),
+                    "perf_12m_pct": round(((icurr / ic12m) - 1.0) * 100.0, 2),
+                }
+        except Exception:
+            pass
+
+    if len(benchmarks_map) >= 2:
+        all_1m = [v["perf_1m_pct"] for v in benchmarks_map.values()]
+        all_6m = [v["perf_6m_pct"] for v in benchmarks_map.values()]
+        benchmarks_map["COMPOSITE"] = {
+            "symbol": "SPY+QQQ+IWM",
+            "name": "Composite Equal-Weight (SPY/QQQ/IWM)",
+            "last_close": result["last_close"],
+            "ema_21": result["ema_21"],
+            "sma_50": result["sma_50"],
+            "dist_to_ema21_pct": result["dist_to_ema21_pct"],
+            "above_ema21": all(v.get("above_ema21", True) for v in benchmarks_map.values()),
+            "perf_1m_pct": round(float(np.mean(all_1m)), 2),
+            "perf_6m_pct": round(float(np.mean(all_6m)), 2),
+        }
+    result["benchmarks"] = benchmarks_map
+
     save_sp500_benchmark(result)
     return result
 
@@ -228,7 +288,7 @@ def enrich_with_yfinance_history(
                     vols = sub_df["Volume"] if "Volume" in sub_df.columns else pd.Series(dtype=float)
 
                     n = len(closes)
-                    if n < 50:
+                    if n < 10:
                         continue
                     bars_count_map[orig_sym] = int(n)
 
@@ -333,3 +393,53 @@ def enrich_with_yfinance_history(
 
     df["updated_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return df
+
+
+def fetch_stock_news_catalyst(ticker: str, max_items: int = 4) -> Dict[str, Any]:
+    """
+    Q2 Expert Upgrade: Fetches the latest news headlines for a stock from Yahoo Finance
+    and classifies Positive Catalysts (Beat, Upgrade, Contract, AI) vs. Governance/CEO/Legal Risk Alerts.
+    """
+    pos_kw = ["beat", "upgrade", "raises", "record", "contract", "partnership", "breakthrough", "approval", "buyback", "surge", "soar"]
+    neg_kw = ["ceo", "affair", "resign", "sec", "doj", "subpoena", "investigation", "fraud", "lawsuit", "probe", "downgrade", "miss", "cuts", "recall", "delay", "tariff"]
+
+    headlines = []
+    pos_hits = 0
+    neg_hits = 0
+    try:
+        raw_news = yf.Ticker(ticker).news or []
+        for item in raw_news[:max_items]:
+            content = item.get("content", {}) if isinstance(item, dict) else {}
+            title = str(item.get("title") or content.get("title") or "").strip()
+            publisher = str(item.get("publisher") or (content.get("provider", {}) or {}).get("displayName") or "News").strip()
+            link = str(item.get("link") or (content.get("canonicalUrl", {}) or {}).get("url") or "").strip()
+            if not title:
+                continue
+            low_t = title.lower()
+            tag = "⚪ Neutral"
+            if any(k in low_t for k in neg_kw):
+                tag = "🔴 Risk Alert"
+                neg_hits += 1
+            elif any(k in low_t for k in pos_kw):
+                tag = "🟢 Catalyst"
+                pos_hits += 1
+            headlines.append({"title": title, "publisher": publisher, "link": link, "tag": tag})
+    except Exception:
+        pass
+
+    if neg_hits > 0:
+        summary_badge = f"🔴 News Risk Alert ({neg_hits} Negative / Governance Headline)"
+    elif pos_hits > 0:
+        summary_badge = f"🟢 Positive Catalyst ({pos_hits} Bullish Headline)"
+    elif headlines:
+        summary_badge = f"📰 {len(headlines)} Recent Headlines (Neutral)"
+    else:
+        summary_badge = "📰 No Adverse News Shock"
+
+    return {
+        "ticker": ticker,
+        "summary_badge": summary_badge,
+        "neg_hits": neg_hits,
+        "pos_hits": pos_hits,
+        "headlines": headlines,
+    }

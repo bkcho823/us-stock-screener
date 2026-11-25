@@ -171,18 +171,67 @@ def evaluate_layer2_momentum_and_sector(
     df["group_total_candidates"] = df.groupby("industry")["ticker"].transform("count").astype(int)
     df["leader_score"] = df["rank_in_group"].apply(_calc_leader_score)
 
-    # 4. Compute Layer 2 Composite Score (0 - 100)
+    # 4. Compute Layer 2 Composite Score (0 - 100) + Q3 CAN SLIM Fundamental Quality Integration
     w_stock = float(layer2_cfg.get("weight_stock_rs", 0.50))
     w_group = float(layer2_cfg.get("weight_group_rs", 0.35))
     w_lead = float(layer2_cfg.get("weight_lead_rank", 0.15))
 
-    df["composite_score"] = (
+    has_fundamentals = ("eps_growth_yoy" in df.columns) or ("rev_growth_yoy" in df.columns)
+    eps_col = pd.to_numeric(df.get("eps_growth_yoy", pd.Series(np.nan, index=df.index)), errors="coerce")
+    rev_col = pd.to_numeric(df.get("rev_growth_yoy", pd.Series(np.nan, index=df.index)), errors="coerce")
+    roe_col = pd.to_numeric(df.get("roe_pct", pd.Series(np.nan, index=df.index)), errors="coerce")
+
+    min_eps_g = float(layer2_cfg.get("min_eps_growth_yoy", 20.0))
+    min_rev_g = float(layer2_cfg.get("min_rev_growth_yoy", 20.0))
+    fund_gate_on = bool(layer2_cfg.get("fund_gate_enabled", False))
+
+    # Build CAN SLIM Fundamental Badge & Tie-Breaker Boost (+0 to +3.0 pts when real fundamental data exists)
+    fund_badges = []
+    fund_boosts = []
+    fund_passes = []
+    for idx_r, row_r in df.iterrows():
+        eg = eps_col.loc[idx_r]
+        rg = rev_col.loc[idx_r]
+        roe_v = roe_col.loc[idx_r]
+        rs_v = int(row_r.get("rs_percentile", 50))
+        if pd.isna(eg) and pd.isna(rg):
+            fund_badges.append("— (Price/RS Mode)")
+            fund_boosts.append(0.0)
+            fund_passes.append(True)
+        else:
+            eg_v = float(eg) if pd.notna(eg) else 0.0
+            rg_v = float(rg) if pd.notna(rg) else 0.0
+            roe_f = float(roe_v) if pd.notna(roe_v) else 0.0
+            is_c_pass = (eg_v >= min_eps_g) or (rg_v >= min_rev_g)
+            is_a_plus = (eg_v >= 25.0 and rg_v >= 20.0) or (eg_v >= 40.0) or (rg_v >= 35.0)
+            if is_a_plus:
+                fund_badges.append(f"💎 CAN SLIM A+ (EPS {eg_v:+.0f}% · Rev {rg_v:+.0f}%)")
+                fund_boosts.append(2.5 if roe_f >= 15.0 else 2.0)
+            elif is_c_pass:
+                fund_badges.append(f"✅ Growth (EPS {eg_v:+.0f}% · Rev {rg_v:+.0f}%)")
+                fund_boosts.append(1.0)
+            elif rs_v >= 90:
+                fund_badges.append(f"🔄 Turnaround RS {rs_v} (EPS {eg_v:+.0f}%)")
+                fund_boosts.append(0.0)
+            else:
+                fund_badges.append(f"⚠️ Slow Growth (EPS {eg_v:+.0f}% · Rev {rg_v:+.0f}%)")
+                fund_boosts.append(-1.5)
+            # Minervini SEPA rule: pass if EPS >= min OR Sales >= min OR RS >= 90 Turnaround Leader
+            fund_passes.append(bool(is_c_pass or rs_v >= 90))
+
+    df["fund_badge"] = fund_badges
+    df["fund_pass"] = fund_passes
+    df["fund_boost"] = fund_boosts
+
+    raw_comp = (
         w_stock * df["rs_percentile"]
         + w_group * df["group_rs_percentile"]
         + w_lead * df["leader_score"]
-    ).round(1)
+        + (df["fund_boost"] if has_fundamentals else 0.0)
+    )
+    df["composite_score"] = np.clip(raw_comp, 0.0, 100.0).round(1)
 
-    # 5. Evaluate Layer 2 Gate: Industry in Top X% OR Lone Wolf Exemption
+    # 5. Evaluate Layer 2 Gate: Industry in Top X% OR Lone Wolf Exemption (plus optional CAN SLIM Gate)
     l2_enabled = bool(layer2_cfg.get("l2_enabled", True))
     gate_enabled = bool(layer2_cfg.get("group_gate_enabled", True))
     top_pct = float(layer2_cfg.get("top_group_pct", 40.0))  # e.g., Top 40% -> group_rs_percentile >= 60
@@ -195,10 +244,11 @@ def evaluate_layer2_momentum_and_sector(
     df["is_lone_wolf"] = lone_wolf_enabled & (df["rs_percentile"] >= lone_wolf_min_rs) & (~df["pass_group_gate"])
 
     if not l2_enabled or not gate_enabled:
-        df["l2_qualified"] = True
+        df["l2_qualified"] = df["fund_pass"] if (l2_enabled and fund_gate_on) else True
         df["l2_badge"] = "⚪ L2 Gate: OFF"
     else:
-        df["l2_qualified"] = df["pass_group_gate"] | df["is_lone_wolf"]
+        base_l2_q = df["pass_group_gate"] | df["is_lone_wolf"]
+        df["l2_qualified"] = (base_l2_q & df["fund_pass"]) if fund_gate_on else base_l2_q
         
         def _make_l2_badge(row: pd.Series) -> str:
             if row["pass_group_gate"]:

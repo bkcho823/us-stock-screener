@@ -15,8 +15,6 @@ Implements:
         (and raise stop on remaining 50% to breakeven), trail remaining 50% until daily `Close < EMA21`.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -392,6 +390,7 @@ def run_walk_forward_simulation(
     max_alloc_pct: float = 25.0,
     max_stop_loss_pct: float = 7.0,
     reward_risk_ratio: float = 2.5,
+    partial_sell_fraction: float = 0.50,
     max_chase_above_pivot_pct: float = 5.0,
     slippage_bps: float = 10.0,            # 0.10% slippage per leg
     require_spy_above_ema21: bool = False, # Optional Senior Trader Market Regime gate
@@ -456,13 +455,16 @@ def run_walk_forward_simulation(
                         to_close.append((sym, exit_px, "Stop-Loss (-1R)"))
                         continue
 
-                    # 2. Check +2.5R partial profit target (sell 50%, raise stop to Breakeven)
+                    # 2. Check partial profit target (sell partial_sell_fraction, raise stop to Breakeven)
                     if b_high >= pos.target_price:
                         raw_t_fill = max(b_open, pos.target_price)
                         part_px = round(raw_t_fill * (1.0 - slip), 4)
-                        sell_sh = max(1, pos.remaining_shares // 2)
+                        if abs(partial_sell_fraction - 0.50) < 1e-6:
+                            sell_sh = max(1, pos.remaining_shares // 2)
+                        else:
+                            sell_sh = max(1, int(round(pos.remaining_shares * partial_sell_fraction)))
                         if sell_sh >= pos.remaining_shares:
-                            to_close.append((sym, part_px, "Target (+2.5R)"))
+                            to_close.append((sym, part_px, f"Target (+{reward_risk_ratio}R)"))
                             continue
 
                         cash += sell_sh * part_px
@@ -515,7 +517,9 @@ def run_walk_forward_simulation(
                     "exit_date": d_str,
                     "entry_price": round(pos.entry_price, 2),
                     "exit_price": round(exit_px, 2),
+                    "partial_exit_date": pos.partial_exit_date if pos.partial_taken else None,
                     "partial_exit_price": round(pos.partial_exit_price, 2) if pos.partial_taken else None,
+                    "partial_shares_sold": pos.partial_shares_sold if pos.partial_taken else 0,
                     "initial_shares": pos.initial_shares,
                     "pnl_dollars": round(total_pnl, 2),
                     "return_pct": round(ret_pct, 2),
@@ -536,6 +540,14 @@ def run_walk_forward_simulation(
         regime_ok = True
         if require_spy_above_ema21 and prev_sp500:
             regime_ok = bool(prev_sp500.get("above_ema21", True))
+        elif prev_sp500:
+            # Expert Panel Market Situation / Macro Shock Guard (Q2 & Q4):
+            # Halt new breakout buys during severe market waterfall crashes (RED_DEFENSIVE & 1M drop <= -4.5%)
+            if (
+                str(prev_sp500.get("market_regime", "")) == "RED_DEFENSIVE"
+                and float(prev_sp500.get("perf_1m_pct", 0.0)) <= -4.5
+            ):
+                regime_ok = False
 
         if prev_pack is not None and regime_ok:
             # Mark-to-market current equity before sizing new trades
@@ -555,7 +567,11 @@ def run_walk_forward_simulation(
                 cands = _select_ranked_table2_candidates(prev_pack["df_scored"], statuses)
 
             for _, crow in cands.iterrows():
-                if len(open_positions) >= max_positions:
+                # JLaw & Minervini Free-Roll Slot Rule:
+                # A 50% runner that already locked in +2.5R and moved its stop to Breakeven (0R risk)
+                # only consumes 0.5 risk slots, preventing zero-risk runners from blocking fresh A+ breakouts.
+                active_risk_slots = sum(0.5 if p.partial_taken else 1.0 for p in open_positions.values())
+                if active_risk_slots >= max_positions or len(open_positions) >= max_positions + 2:
                     break
                 sym = str(crow["ticker"])
                 if sym in open_positions:
@@ -712,7 +728,9 @@ def run_walk_forward_simulation(
                 "exit_date": f"{last_date} (MTM)",
                 "entry_price": round(pos.entry_price, 2),
                 "exit_price": round(px_end, 2),
+                "partial_exit_date": pos.partial_exit_date if pos.partial_taken else None,
                 "partial_exit_price": round(pos.partial_exit_price, 2) if pos.partial_taken else None,
+                "partial_shares_sold": pos.partial_shares_sold if pos.partial_taken else 0,
                 "initial_shares": pos.initial_shares,
                 "pnl_dollars": round(total_pnl, 2),
                 "return_pct": round(ret_pct, 2),

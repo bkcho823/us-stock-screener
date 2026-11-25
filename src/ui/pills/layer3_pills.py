@@ -83,6 +83,11 @@ def render_layer3_pills(l3: Dict[str, Any], l3_meta: Dict[str, Any] | None = Non
             st.markdown("**JLaw EMA Trend Alignment**")
             st.caption("Verifies that short-term moving average is stacked above medium-term (Close > 21EMA > 50EMA).")
             l3["require_ema_alignment"] = st.toggle("Require Close > 21EMA > 50EMA", value=require_ema)
+            l3["news_shock_guard_enabled"] = st.toggle(
+                "🚨 News Shock & Distribution Guard",
+                value=bool(l3.get("news_shock_guard_enabled", True)),
+                help="Automatically filters out stocks suffering from a recent heavy-volume institutional distribution or adverse news shock.",
+            )
 
     # 5. Pill: Layer 3 Status & Summary
     with l3_cols[4]:

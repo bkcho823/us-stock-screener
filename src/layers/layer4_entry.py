@@ -43,6 +43,8 @@ def evaluate_layer4_entry_signals(
     min_vol_expansion = float(layer4_cfg.get("min_vol_expansion_pct", 120.0))
     max_buy_zone = float(layer4_cfg.get("max_buy_zone_pct", 3.5))
     on_deck_pct = float(layer4_cfg.get("on_deck_pct", 3.0))
+    use_handle_pivot = bool(layer4_cfg.get("use_handle_coil_pivot", True))
+    adaptive_vol = bool(layer4_cfg.get("adaptive_vol_for_tight_coil", True))
     status_filter = str(layer4_cfg.get("action_status_filter", "ALL")).upper()
 
     # 1. Volume Expansion Ratio vs 50D/60D Average Volume
@@ -56,8 +58,9 @@ def evaluate_layer4_entry_signals(
     vol_1d = df.get("vol_1d", pd.Series(1, index=df.index))
     df["vol_expansion_pct"] = ((vol_1d / vol_avg.replace(0, np.nan)) * 100.0).fillna(100.0).clip(10.0, 500.0).round(1)
 
-    # 2. Pivot Resistance Price Calculation (P0 Fix: Pre-Breakout 10D Coil Swing High & Prior 52W High)
+    # 2. Pivot Resistance Price Calculation (Q5 Expert Upgrade: VCP Handle / 10D Tight Coil High vs 52W High)
     pivot_prices = []
+    pivot_types = []
     for _, row in df.iterrows():
         close = float(row.get("close", 10.0))
         high_52w = float(row.get("high_52w", close))
@@ -66,15 +69,28 @@ def evaluate_layer4_entry_signals(
         coil_high = float(row.get("coil_pivot_high", 0.0))
         contraction = float(row.get("last_contraction_pct", 6.0))
 
-        if ref_52w > 0 and close >= ref_52w:
+        if use_handle_pivot and coil_high > 0 and contraction <= 8.5 and ref_52w > 0 and coil_high < ref_52w * 0.985:
+            # O'Neil Cup-with-Handle & Minervini VCP Handle Rule:
+            # When a stock forms a tight 10D VCP handle (>1.5% below the old 52W high),
+            # the true actionable breakout pivot is the 10D Handle High (coil_high), unless price already cleared ref_52w
+            if close >= ref_52w:
+                pivot = round(ref_52w, 2)
+                p_type = "52W High"
+            else:
+                pivot = round(coil_high, 2)
+                p_type = "10D VCP Handle"
+        elif ref_52w > 0 and close >= ref_52w:
             # Breaking out at/above prior 52W high: pivot resistance is the prior 52W high level
             pivot = round(ref_52w, 2)
+            p_type = "52W High"
         elif ref_52w > 0 and ((ref_52w - close) / close) <= 0.08:
             # Within 8% of 52W high: primary overhead resistance is the prior 52W high
             pivot = round(ref_52w, 2)
+            p_type = "52W High"
         elif coil_high > 0:
             # Mid-base VCP (>8% below 52W high): resistance is the 10D pre-breakout consolidation swing high
             pivot = round(coil_high, 2)
+            p_type = "10D VCP Coil"
         else:
             # Un-enriched fallback: if breaking out above SMA10 with a mid-base coil, anchor to SMA10; else 52W high
             sma_10_val = float(row.get("sma_10", 0.0) or 0.0)
@@ -85,23 +101,36 @@ def evaluate_layer4_entry_signals(
                 pivot = round(ref_52w, 2)
             else:
                 pivot = round(close * (1.0 + (offset / 100.0)), 2)
+            p_type = "Est. Pivot"
         pivot_prices.append(pivot)
+        pivot_types.append(p_type)
 
     df["pivot_price"] = pivot_prices
+    df["pivot_type"] = pivot_types
 
-    # 3. Distance to Pivot (%): (Close - Pivot) / Pivot * 100
+    # 3. Distance to Pivot (%): (Close - Pivot) / Pivot * 100 (Price Location evaluated FIRST)
     df["dist_to_pivot_pct"] = (((df["close"] - df["pivot_price"]) / df["pivot_price"]) * 100.0).round(2)
 
-    # 4. Action Status Classification
+    # 4. Action Status Classification (Q6 Expert Upgrade: Price-First, Adaptive Volume Confirmation)
     action_statuses = []
     action_badges = []
 
     for _, row in df.iterrows():
         dist = float(row["dist_to_pivot_pct"])
         vol_exp = float(row["vol_expansion_pct"])
+        contraction = float(row.get("last_contraction_pct", 6.0))
+        vcp_sc = float(row.get("vcp_score", 60.0))
+        rs_p = int(row.get("rs_percentile", 70))
 
-        # State 1: Triggered Today (Breaking out now with heavy institutional volume surge)
-        if 0.0 <= dist <= max_buy_zone and vol_exp >= min_vol_expansion:
+        # Q6: If Price coil is A+ Ultra-Tight (<= 5.5%, VCP >= 70, RS >= 85), allow 0.85x volume threshold
+        eff_min_vol = (
+            min_vol_expansion * 0.85
+            if (adaptive_vol and contraction <= 5.5 and vcp_sc >= 70.0 and rs_p >= 85)
+            else min_vol_expansion
+        )
+
+        # State 1: Triggered Today (Price cleared pivot within buy zone + Volume confirmation)
+        if 0.0 <= dist <= max_buy_zone and vol_exp >= eff_min_vol:
             status = "TRIGGERED"
             badge = f"🚀 TRIGGERED ({dist:+.1f}% · Vol {vol_exp:.0f}%)"
         # State 2: In Buy Zone (Above pivot within low-risk tolerance)

@@ -104,7 +104,7 @@ def build_pit_panel(
     ohlc_fast_lookup: Dict[str, pd.DataFrame] = {}
 
     for sym, raw_df in ohlcv_map.items():
-        if sym not in meta_by_sym or raw_df is None or len(raw_df) < 35:
+        if sym not in meta_by_sym or raw_df is None or len(raw_df) < 10:
             continue
 
         df = raw_df.sort_index().copy()
@@ -140,10 +140,16 @@ def build_pit_panel(
         ema_50 = c.ewm(span=50, adjust=False).mean()
 
         first_c = float(c.iloc[0]) if len(c) > 0 and c.iloc[0] > 0 else 1.0
-        perf_1m = ((c / c.shift(21)) - 1.0) * 100.0
-        perf_3m = ((c / c.shift(63)) - 1.0) * 100.0
-        perf_6m = ((c / c.shift(126)) - 1.0) * 100.0
-        # Match TradingView since-inception fallback once stock has >=150 bars
+        is_true_ipo_series = len(c) < 250
+        if is_true_ipo_series:
+            perf_1m = ((c / c.shift(21).fillna(first_c)) - 1.0) * 100.0
+            perf_3m = ((c / c.shift(63).fillna(first_c)) - 1.0) * 100.0
+            perf_6m = ((c / c.shift(126).fillna(first_c)) - 1.0) * 100.0
+        else:
+            perf_1m = ((c / c.shift(21)) - 1.0) * 100.0
+            perf_3m = ((c / c.shift(63)) - 1.0) * 100.0
+            perf_6m = ((c / c.shift(126)) - 1.0) * 100.0
+        # Match TradingView since-inception fallback once stock has >=10 bars
         c_shift_189 = c.shift(189).fillna(first_c)
         c_shift_252 = c.shift(252).fillna(first_c)
         perf_9m = ((c / c_shift_189) - 1.0) * 100.0
@@ -161,17 +167,25 @@ def build_pit_panel(
         l_prev = l.shift(1)
         c_prev = c.shift(1)
 
-        high_52w_pit = h_prev.rolling(252, min_periods=35).max().fillna(h)
-        low_52w_pit = l_prev.rolling(252, min_periods=35).min().fillna(l)
-        swing_high_20d_pit = h_prev.rolling(20, min_periods=8).max().fillna(high_52w_pit)
-        coil_pivot_high_pit = h_prev.rolling(10, min_periods=5).max().fillna(high_52w_pit)
+        high_52w_pit = h_prev.rolling(252, min_periods=10).max().fillna(h)
+        low_52w_pit = l_prev.rolling(252, min_periods=10).min().fillna(l)
+        swing_high_20d_pit = h_prev.rolling(20, min_periods=5).max().fillna(high_52w_pit)
+        coil_pivot_high_pit = h_prev.rolling(10, min_periods=4).max().fillna(high_52w_pit)
 
-        coil_hi_pit = c_prev.rolling(10, min_periods=5).max()
-        coil_lo_pit = c_prev.rolling(10, min_periods=5).min()
+        coil_hi_pit = c_prev.rolling(10, min_periods=4).max()
+        coil_lo_pit = c_prev.rolling(10, min_periods=4).min()
         contraction_pit = (((coil_hi_pit - coil_lo_pit) / coil_hi_pit.replace(0, np.nan)) * 100.0).clip(1.0, 40.0).fillna(10.0)
 
         vol_coil_med_pit = v_prev.rolling(5, min_periods=3).median()
         vol_dryup_pit = ((vol_coil_med_pit / vol_60d.replace(0, np.nan)) * 100.0).clip(10.0, 200.0).fillna(80.0)
+
+        # Q2: News Shock / Abnormal Institutional Distribution Guard
+        # Flags if in [T-3 : T-1] there was a heavy-volume (-6.5%+ on >=200% vol) distribution shock & price is still < EMA21
+        ret_1d_prev = ((c_prev / c_prev.shift(1)) - 1.0) * 100.0
+        vol_ratio_prev = (v_prev / vol_60d.replace(0, np.nan)) * 100.0
+        severe_dump_bar = (ret_1d_prev <= -6.5) & (vol_ratio_prev >= 200.0)
+        recent_dump_3d = severe_dump_bar.rolling(3, min_periods=1).max().fillna(0) > 0
+        has_news_shock = recent_dump_3d & (c < ema_21)
 
         # P1: 20-Day Average Daily Range %: mean((High - Low) / Low * 100) over [T-20 : T-1]
         daily_range_pct_prev = ((h_prev - l_prev) / l_prev.replace(0, np.nan)) * 100.0
@@ -243,6 +257,7 @@ def build_pit_panel(
                 "low_52w_asis": low_52w_asis.round(2),
                 "contraction_asis": contraction_asis.round(2),
                 "vol_dryup_asis": vol_dryup_asis.round(1),
+                "has_news_shock": has_news_shock.astype(bool),
             },
             index=df.index,
         )

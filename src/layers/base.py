@@ -2,8 +2,6 @@
 Base Contracts & Data Structures for the Pluggable Multi-Layer Screening Engine (Layers 0 through 5).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Dict, Any, Protocol, Tuple
 

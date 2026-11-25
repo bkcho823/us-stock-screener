@@ -13,6 +13,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from src.config import build_tv_chart_url, extract_tv_layout_id
+from src.providers.yahoo_finance import fetch_stock_news_catalyst
 
 
 def _render_tradingview_advanced_chart(exchange: str, ticker: str, height: int = 500) -> None:
@@ -131,7 +132,7 @@ def render_tradingview_cockpit(df_view: pd.DataFrame) -> None:
     badges = [f"`{b}`" for b in [act_b, risk_b, er_display, pass_sum, diag_b, vcp_b] if b]
     badge_str = f"({' · '.join(badges)})" if badges else ""
 
-    dr_hdr1, nav_prev_col, nav_next_col, dr_hdr2 = st.columns([2.9, 0.65, 0.85, 1.25])
+    dr_hdr1, nav_prev_col, nav_next_col, news_col, dr_hdr2 = st.columns([2.5, 0.6, 0.8, 0.9, 1.15])
     with dr_hdr1:
         st.markdown(
             f"#### 📈 **[{active_idx + 1}/{len(df_view)}] {sel_exch}:{sel_ticker}** — {sel_name} {badge_str}"
@@ -154,6 +155,18 @@ def render_tradingview_cockpit(df_view: pd.DataFrame) -> None:
         ):
             st.session_state["active_row_idx"] = min(len(df_view) - 1, active_idx + 1)
             st.rerun()
+    with news_col:
+        with st.popover(f"📰 {sel_ticker} News", use_container_width=True):
+            st.markdown(f"**📰 Latest Headlines & Catalyst Check ({sel_ticker})**")
+            if st.button(f"🔍 Scan Live {sel_ticker} News", key=f"btn_news_{sel_ticker}", use_container_width=True):
+                st.session_state[f"news_cache_{sel_ticker}"] = fetch_stock_news_catalyst(sel_ticker)
+            nc = st.session_state.get(f"news_cache_{sel_ticker}")
+            if nc:
+                st.write(f"**Status:** {nc.get('summary_badge', '')}")
+                for h_item in nc.get("headlines", []):
+                    st.markdown(f"- {h_item['tag']} **{h_item['title']}** *({h_item['publisher']})*")
+            else:
+                st.caption("Click above to scan real-time Yahoo Finance headlines for earnings catalysts or CEO/governance risk alerts.")
     with dr_hdr2:
         btn_label = (
             f"📈 Open {sel_ticker} in BKCHO Chart ↗"

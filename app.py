@@ -18,11 +18,6 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-# Evict cached application modules to ensure fresh imports during Streamlit Cloud hot-reloads
-for _m in list(sys.modules.keys()):
-    if _m.startswith("src.ui") or _m.startswith("src.layers") or _m.startswith("src.config"):
-        sys.modules.pop(_m, None)
-
 import streamlit as st
 
 from src.layers import run_screening_pipeline

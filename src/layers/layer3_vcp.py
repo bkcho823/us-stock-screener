@@ -109,9 +109,16 @@ def evaluate_layer3_vcp_and_structure(
     max_vol_dryup = float(layer3_cfg.get("max_vol_dryup_pct", 65.0))
     min_tightness = float(layer3_cfg.get("min_tightness_score", 60.0))
     min_adr_pct = float(layer3_cfg.get("min_adr_pct", 2.5))
+    news_shock_guard = bool(layer3_cfg.get("news_shock_guard_enabled", True))
 
-    # 1. JLaw EMA Alignment: Close > 21EMA > 50EMA
-    df["ema_aligned"] = (df["close"] > df["ema_21"]) & (df["ema_21"] > df["ema_50"])
+    # 1. JLaw EMA Alignment: Close > 21EMA > 50EMA (Young 10-49D IPO Primary Base: Close > SMA10 >= 21EMA)
+    is_young_ipo = df.get("is_young_ipo_base", pd.Series(False, index=df.index)).fillna(False)
+    sma10_s = df.get("sma_10", df["ema_21"]).fillna(df["ema_21"])
+    df["ema_aligned"] = np.where(
+        is_young_ipo,
+        (df["close"] > sma10_s) & (sma10_s >= df["ema_21"] * 0.995),
+        (df["close"] > df["ema_21"]) & (df["ema_21"] > df["ema_50"]),
+    )
 
     # Pullback Support: testing 21EMA or 50EMA within -1.5% to +2.5% cushion
     df["dist_to_ema21_pct"] = (((df["close"] - df["ema_21"]) / df["ema_21"]) * 100.0).round(2)
@@ -122,7 +129,14 @@ def evaluate_layer3_vcp_and_structure(
     df["is_vol_dryup"] = df["vol_dryup_pct"] <= max_vol_dryup
     df["is_adr_qualified"] = df["adr_20_pct"] >= min_adr_pct
 
-    # 3. VCP Tightness Score (0-100)
+    # Q2 Expert Upgrade: News Shock & Institutional Distribution Guard
+    # Flags stocks experiencing an abnormal high-volume negative shock (e.g. CEO scandal, regulatory hit, earnings dump)
+    if "has_news_shock" in df.columns:
+        df["has_news_shock"] = df["has_news_shock"].fillna(False).astype(bool)
+    else:
+        df["has_news_shock"] = pd.Series(False, index=df.index)
+
+    # 3. VCP Tightness Score (0-100) — Price Tightness (50 pts) + Volume Dry-Up (35 pts) + EMA Structure (15 pts)
     df["vcp_score"] = [
         _calc_vcp_tightness_score(float(c), float(v), bool(e))
         for c, v, e in zip(df["last_contraction_pct"], df["vol_dryup_pct"], df["ema_aligned"])
@@ -136,6 +150,8 @@ def evaluate_layer3_vcp_and_structure(
         cond = ((df["vcp_score"] >= min_tightness) | (df["is_tight_contraction"] & df["is_vol_dryup"])) & df["is_adr_qualified"]
         if require_ema:
             cond &= df["ema_aligned"]
+        if news_shock_guard:
+            cond &= (~df["has_news_shock"])
         df["l3_qualified"] = cond
 
     # 5. Descriptive Pattern Badge
@@ -143,6 +159,8 @@ def evaluate_layer3_vcp_and_structure(
         contraction = row["last_contraction_pct"]
         vol = row["vol_dryup_pct"]
         adr = row["adr_20_pct"]
+        if row.get("has_news_shock", False):
+            return "🚨 News / Distribution Shock"
         if not row["is_adr_qualified"]:
             return f"🐢 Low ADR ({adr:.1f}% < {min_adr_pct:g}%)"
         if row["is_tight_contraction"] and row["is_vol_dryup"]:

@@ -51,6 +51,12 @@ def render_layer2_pills(l2: Dict[str, Any], l2_meta: Dict[str, Any] | None = Non
                 value=int(l2.get("lone_wolf_min_rs", 90)),
                 step=1,
             )
+            st.markdown("---")
+            l2["fund_gate_enabled"] = st.toggle(
+                "💎 Enable CAN SLIM Fundamental Gate (EPS/Sales ≥ 20% or RS ≥ 90)",
+                value=bool(l2.get("fund_gate_enabled", False)),
+                help="O'Neil CAN SLIM + Minervini SEPA rule: Requires YoY EPS Growth >= 20% or Revenue Growth >= 20% (with an automatic exemption for RS >= 90 turnaround leaders).",
+            )
 
     # 3. Pill: Composite Score Weights
     with l2_cols[2]:

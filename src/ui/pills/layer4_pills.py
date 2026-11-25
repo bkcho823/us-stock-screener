@@ -107,6 +107,17 @@ def render_layer4_pills(l4: Dict[str, Any], l4_meta: Dict[str, Any] | None = Non
                 step=0.5,
                 help="Stocks within this % below pivot are tagged as ⏳ ON DECK.",
             )
+            st.markdown("---")
+            l4["use_handle_coil_pivot"] = st.toggle(
+                "🎯 Use 10D VCP Handle / Coil Pivot Priority",
+                value=bool(l4.get("use_handle_coil_pivot", True)),
+                help="O'Neil & Minervini rule: Uses the 10-day tight VCP handle high as the breakout pivot rather than waiting for a distant 52-week high.",
+            )
+            l4["adaptive_vol_for_tight_coil"] = st.toggle(
+                "⚡ Price-First Adaptive Volume (0.85x for A+ Tight Coils)",
+                value=bool(l4.get("adaptive_vol_for_tight_coil", True)),
+                help="When a stock has an A+ tight price coil (<=5.5%, VCP>=70, RS>=85), allows breakout confirmation at 0.85x the volume threshold.",
+            )
 
     # 4. Pill: Breakout Action Status Summary
     with l4_cols[3]:
